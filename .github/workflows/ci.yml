@@ -152,6 +152,10 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y uidmap
 
+          # Ubuntu 24.04 restricts unprivileged user namespaces, which RootlessKit
+          # needs; relax it so the rootless daemon can start (safe on ephemeral CI)
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
           curl -fsSL https://get.docker.com/rootless | sh
           export PATH=$HOME/bin:$PATH
           export DOCKER_HOST=unix://${XDG_RUNTIME_DIR}/docker.sock
