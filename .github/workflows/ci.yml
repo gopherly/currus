@@ -137,10 +137,16 @@ jobs:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Start Docker rootless
+        env:
+          # The install script aborts when /var/run/docker.sock is writable;
+          # we stop rootful Docker below, so skip that guard explicitly.
+          FORCE_ROOTLESS_INSTALL: "1"
         run: |
           # GitHub runners ship rootful Docker; stop it so rootless can take over
           sudo systemctl stop docker.service docker.socket || true
           sudo systemctl disable docker.service docker.socket || true
+          # the stopped service leaves the socket file behind; remove it
+          sudo rm -f /var/run/docker.sock
 
           # rootless prerequisite (newuidmap/newgidmap)
           sudo apt-get update -q
