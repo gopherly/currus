@@ -1,0 +1,133 @@
+// Copyright 2026 The Gopherly Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Package currus provides a single, neutral API for the container lifecycle
+// that auto-detects and drives Docker, Podman, or containerd through engine
+// client APIs, never by shelling out to a CLI.
+//
+// # Architecture
+//
+// Currus follows the database/sql shape: a neutral interface on top, with
+// pluggable engine drivers beneath. Engine selection is auto-detected by
+// default (probing endpoints in priority order with a Ping validation), or
+// explicit via [WithEngine].
+//
+// The neutral container model is explicitly Docker-like. Engines that do not
+// natively implement it (notably containerd) are adapted to it. Where an
+// engine cannot express part of the model, that part is surfaced via a
+// capability interface and [Caps] rather than silently faked.
+//
+// # Quick start
+//
+// Zero-config: detect whatever engine is installed.
+//
+//	eng := currus.MustNew(ctx, currus.WithLogger(slog.Default()))
+//	defer eng.Close()
+//
+//	if err := eng.PullImage(ctx, "docker.io/library/redis:7", currus.PullImageOpts{}); err != nil {
+//	    log.Fatal(err)
+//	}
+//
+//	id, err := eng.CreateContainer(ctx, currus.ContainerSpec{
+//	    Image: "docker.io/library/redis:7",
+//	    Name:  "cache",
+//	})
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//
+//	if err := eng.StartContainer(ctx, id); err != nil {
+//	    log.Fatal(err)
+//	}
+//
+// Explicit engine selection:
+//
+//	eng, err := currus.New(ctx, currus.WithEngine(currus.Podman))
+//
+// Remote Docker over TLS:
+//
+//	eng, err := currus.New(ctx,
+//	    currus.WithEngine(currus.Docker),
+//	    currus.WithEndpoint(currus.Endpoint{
+//	        Host: "tcp://docker-host:2376",
+//	        TLS: &currus.TLSConfig{
+//	            CACert: caCertPEM,
+//	            Cert:   certPEM,
+//	            Key:    keyPEM,
+//	        },
+//	    }),
+//	)
+//
+// # Engine interface
+//
+// [Engine] exposes the small core that every backend supports: identity,
+// Ping, Close, and the universal container lifecycle (pull/create/start/
+// stop/remove/list). Non-universal features live behind optional capability
+// interfaces discovered by type assertion:
+//
+//	if lg, ok := eng.(currus.Logger); ok {
+//	    rc, _ := lg.ContainerLogs(ctx, id, currus.ContainerLogsOpts{})
+//	    defer rc.Close()
+//	    io.Copy(os.Stdout, rc)
+//	}
+//
+// # Capability matrix
+//
+// The following table shows which capabilities each engine implements.
+// A "—" means the engine does not implement the interface; type-asserting
+// it yields ok == false.
+//
+//	Capability   │ Docker │ Podman │ containerd
+//	─────────────┼────────┼────────┼───────────
+//	Engine       │ ✓      │ ✓      │ ✓
+//	Logger       │ ✓      │ ✓      │ —
+//	Execer       │ ✓      │ ✓      │ —
+//	Inspector    │ ✓      │ ✓      │ —
+//	Stater       │ ✓      │ ✓      │ —
+//	Waiter       │ ✓      │ ✓      │ —
+//	Eventer      │ ✓      │ ✓      │ —
+//	Imager       │ ✓      │ ✓      │ —
+//	Networker    │ ✓      │ ✓      │ —
+//	Volumer      │ ✓      │ ✓      │ —
+//	Copier       │ ✓      │ ✓      │ —
+//
+// # Error handling
+//
+// Errors are normalized into a stable sentinel taxonomy ([ErrNotFound],
+// [ErrAlreadyExists], [ErrConflict], [ErrNotImplemented], [ErrUnsupported])
+// usable with [errors.Is] / [errors.As] across every engine:
+//
+//	if errors.Is(err, currus.ErrNotFound) { ... }
+//
+// # Testing
+//
+// Swap the real engine for the in-memory fake from
+// [gopherly.dev/currus/currustest]:
+//
+//	eng := currustest.New() // implements Engine + all capability interfaces
+//
+// The [gopherly.dev/currus/conformance] package provides a shared behavioral
+// test suite that verifies any Engine implementation. Driver maintainers can
+// run it against both the in-memory fake and real daemons.
+//
+// # Platform support
+//
+// The Docker-API driver (serving Docker and Podman) is pure HTTP and builds
+// on Linux, macOS, and Windows. The containerd driver is supported on Linux
+// only (containerd is not available on macOS or Windows outside of a VM).
+// Rootless Docker and rootless Podman are fully supported via auto-detection
+// through the XDG_RUNTIME_DIR socket paths.
+//
+// For more details, see https://pkg.go.dev/gopherly.dev/currus
+package currus
