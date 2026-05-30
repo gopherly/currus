@@ -159,7 +159,7 @@ jobs:
           curl -fsSL https://get.docker.com/rootless | sh
           export PATH=$HOME/bin:$PATH
           export DOCKER_HOST=unix://${XDG_RUNTIME_DIR}/docker.sock
-          dockerd-rootless.sh &
+          # the installer already starts docker.service; just wait for readiness
           for i in $(seq 1 10); do
             docker -H "$DOCKER_HOST" info >/dev/null 2>&1 && break
             sleep 1
