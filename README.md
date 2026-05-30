@@ -18,7 +18,8 @@ runs underneath.
 go get gopherly.dev/currus
 ```
 
-Requires Go 1.26 or later.
+> [!IMPORTANT]
+> Requires Go 1.26 or later.
 
 ```go
 import "gopherly.dev/currus"
@@ -108,6 +109,10 @@ if err := eng.StartContainer(ctx, id); err != nil {
     log.Fatalf("start: %v", err)
 }
 ```
+
+> [!WARNING]
+> `MustNew` panics if no engine is reachable. Use `New` when you want to
+> handle the error yourself.
 
 ## Auto-detection
 
@@ -298,9 +303,10 @@ that interface returns `ok == false`.
 | Volumes (`Volumer`)      | Yes    | Yes    | No         |
 | Copy files (`Copier`)    | Yes    | Yes    | No         |
 
-The containerd driver implements only the core `Engine` today. containerd has no
-native container logs through its client API, and the other capabilities are not
-yet adapted to its model.
+> [!NOTE]
+> The containerd driver implements only the core `Engine` today. containerd has
+> no native container logs through its client API, and the other capabilities
+> are not yet adapted to its model.
 
 ## Examples
 

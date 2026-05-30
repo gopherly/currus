@@ -138,11 +138,22 @@ jobs:
 
       - name: Start Docker rootless
         run: |
+          # GitHub runners ship rootful Docker; stop it so rootless can take over
+          sudo systemctl stop docker.service docker.socket || true
+          sudo systemctl disable docker.service docker.socket || true
+
+          # rootless prerequisite (newuidmap/newgidmap)
+          sudo apt-get update -q
+          sudo apt-get install -y uidmap
+
           curl -fsSL https://get.docker.com/rootless | sh
           export PATH=$HOME/bin:$PATH
           export DOCKER_HOST=unix://${XDG_RUNTIME_DIR}/docker.sock
           dockerd-rootless.sh &
-          sleep 3
+          for i in $(seq 1 10); do
+            docker -H "$DOCKER_HOST" info >/dev/null 2>&1 && break
+            sleep 1
+          done
           echo "DOCKER_HOST=unix://${XDG_RUNTIME_DIR}/docker.sock" >> "$GITHUB_ENV"
           echo "PATH=$HOME/bin:$PATH" >> "$GITHUB_ENV"
 
