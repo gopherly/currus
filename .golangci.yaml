@@ -417,10 +417,8 @@ linters:
         max-len:
           length: 80
       disable:
-        # staticcheck ST1021/ST1022: comment should start with symbol name.
+        # Overlaps with staticcheck ST1021/ST1022; staticcheck is the authority.
         - start-with-name
-        # staticcheck ST1020: exported identifiers must have a doc comment.
-        - require-doc
 
     gocritic:
       enabled-tags:

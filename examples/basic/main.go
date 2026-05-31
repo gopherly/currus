@@ -27,6 +27,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strings"
 
 	"gopherly.dev/currus"
 )
@@ -53,6 +54,12 @@ func run() error {
 
 	logger.Info("engine detected", "kind", eng.Engine())
 
+	if er, ok := eng.(currus.EndpointReporter); ok {
+		ep := er.Endpoint()
+		sock := strings.TrimPrefix(ep.Host, "unix://")
+		logger.Info("resolved engine endpoint", "host", ep.Host, "socket", sock)
+	}
+
 	const image = "docker.io/library/busybox:latest"
 
 	logger.Info("pulling image", "ref", image)
@@ -63,10 +70,11 @@ func run() error {
 
 	logger.Info("creating container")
 	id, err := eng.CreateContainer(ctx, currus.ContainerSpec{
-		Image:   image,
-		Name:    "currus-basic-example",
-		Command: []string{"echo"},
-		Args:    []string{"hello from currus"},
+		Image:    image,
+		Name:     "currus-basic-example",
+		Command:  []string{"echo"},
+		Args:     []string{"hello from currus"},
+		Networks: []currus.NetworkAttachment{{Name: "bridge"}},
 	})
 	if err != nil {
 		logger.Error("create container failed", "err", err)

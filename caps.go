@@ -104,6 +104,22 @@ type Networker interface {
 	CreateNetwork(ctx context.Context, name string, o CreateNetworkOpts) (NetworkID, error)
 	ListNetworks(ctx context.Context, o ListNetworksOpts) ([]Network, error)
 	RemoveNetwork(ctx context.Context, id NetworkID, o RemoveNetworkOpts) error
+	// ConnectContainer connects a running container to a network.
+	ConnectContainer(ctx context.Context, net NetworkID, id ContainerID, o ConnectOpts) error
+	// DisconnectContainer disconnects a container from a network.
+	DisconnectContainer(ctx context.Context, net NetworkID, id ContainerID, o DisconnectOpts) error
+}
+
+// ConnectOpts controls ConnectContainer.
+type ConnectOpts struct {
+	// Aliases are optional extra DNS names for this container on the network.
+	Aliases []string
+}
+
+// DisconnectOpts controls DisconnectContainer.
+type DisconnectOpts struct {
+	// Force disconnects the container even if it is running.
+	Force bool
 }
 
 // NetworkID is the opaque identifier for a container network.
@@ -272,4 +288,18 @@ type Event struct {
 	Type   string
 	Action string
 	Actor  string
+}
+
+// EndpointReporter reports the endpoint the engine actually connected to.
+// Callers can use the resolved Host URI to, for example, derive the host
+// socket path when bind-mounting it into a sidecar container:
+//
+//	sock := "/var/run/docker.sock"
+//	if er, ok := eng.(currus.EndpointReporter); ok {
+//	    sock = strings.TrimPrefix(er.Endpoint().Host, "unix://")
+//	}
+//
+// Implemented by Docker, Podman, and containerd drivers.
+type EndpointReporter interface {
+	Endpoint() Endpoint
 }

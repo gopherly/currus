@@ -47,6 +47,8 @@ type Engine struct {
 	containers map[currus.ContainerID]*fakeContainer
 	images     map[string]bool
 	networks   map[currus.NetworkID]currus.Network
+	// netMembers maps network ID to the set of container IDs currently attached.
+	netMembers map[currus.NetworkID]map[currus.ContainerID]struct{}
 	volumes    map[currus.VolumeID]currus.Volume
 	counter    atomic.Uint64
 }
@@ -59,17 +61,18 @@ type fakeContainer struct {
 
 // Compile-time assertions.
 var (
-	_ currus.Engine    = (*Engine)(nil)
-	_ currus.Logger    = (*Engine)(nil)
-	_ currus.Execer    = (*Engine)(nil)
-	_ currus.Inspector = (*Engine)(nil)
-	_ currus.Stater    = (*Engine)(nil)
-	_ currus.Waiter    = (*Engine)(nil)
-	_ currus.Eventer   = (*Engine)(nil)
-	_ currus.Imager    = (*Engine)(nil)
-	_ currus.Networker = (*Engine)(nil)
-	_ currus.Volumer   = (*Engine)(nil)
-	_ currus.Copier    = (*Engine)(nil)
+	_ currus.Engine           = (*Engine)(nil)
+	_ currus.Logger           = (*Engine)(nil)
+	_ currus.Execer           = (*Engine)(nil)
+	_ currus.Inspector        = (*Engine)(nil)
+	_ currus.Stater           = (*Engine)(nil)
+	_ currus.Waiter           = (*Engine)(nil)
+	_ currus.Eventer          = (*Engine)(nil)
+	_ currus.Imager           = (*Engine)(nil)
+	_ currus.Networker        = (*Engine)(nil)
+	_ currus.Volumer          = (*Engine)(nil)
+	_ currus.Copier           = (*Engine)(nil)
+	_ currus.EndpointReporter = (*Engine)(nil)
 )
 
 // New returns a ready-to-use in-memory fake Engine.
@@ -78,6 +81,7 @@ func New() *Engine {
 		containers: make(map[currus.ContainerID]*fakeContainer),
 		images:     make(map[string]bool),
 		networks:   make(map[currus.NetworkID]currus.Network),
+		netMembers: make(map[currus.NetworkID]map[currus.ContainerID]struct{}),
 		volumes:    make(map[currus.VolumeID]currus.Volume),
 	}
 }
@@ -113,6 +117,7 @@ func (e *Engine) PullImage(_ context.Context, ref string, _ currus.PullImageOpts
 
 // CreateContainer creates an in-memory container. It does NOT require the
 // image to have been pulled first; the fake is permissive to ease test setup.
+// Any networks listed in spec.Networks are recorded as memberships immediately.
 func (e *Engine) CreateContainer(_ context.Context, spec currus.ContainerSpec) (currus.ContainerID, error) {
 	if spec.Image == "" {
 		return "", fmt.Errorf("currustest: create container: %w: image is required", currus.ErrNotFound)
@@ -121,6 +126,13 @@ func (e *Engine) CreateContainer(_ context.Context, spec currus.ContainerSpec) (
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.containers[id] = &fakeContainer{spec: spec, state: "created"}
+	for _, n := range spec.Networks {
+		netID := currus.NetworkID(n.Name)
+		if _, ok := e.netMembers[netID]; !ok {
+			e.netMembers[netID] = make(map[currus.ContainerID]struct{})
+		}
+		e.netMembers[netID][id] = struct{}{}
+	}
 
 	return id, nil
 }
@@ -158,7 +170,7 @@ func (e *Engine) StopContainer(_ context.Context, id currus.ContainerID, _ curru
 	return nil
 }
 
-// RemoveContainer deletes a container.
+// RemoveContainer deletes a container and removes it from any network memberships.
 func (e *Engine) RemoveContainer(_ context.Context, id currus.ContainerID, o currus.RemoveContainerOpts) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -170,6 +182,12 @@ func (e *Engine) RemoveContainer(_ context.Context, id currus.ContainerID, o cur
 		return fmt.Errorf("currustest: remove %s: %w: container is running", id, currus.ErrConflict)
 	}
 	delete(e.containers, id)
+	for netID, members := range e.netMembers {
+		delete(members, id)
+		if len(members) == 0 {
+			delete(e.netMembers, netID)
+		}
+	}
 
 	return nil
 }
@@ -363,8 +381,61 @@ func (e *Engine) RemoveNetwork(_ context.Context, id currus.NetworkID, _ currus.
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	delete(e.networks, id)
+	delete(e.netMembers, id)
 
 	return nil
+}
+
+// ConnectContainer implements currus.Networker.
+func (e *Engine) ConnectContainer(_ context.Context, net currus.NetworkID, id currus.ContainerID, _ currus.ConnectOpts) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if _, ok := e.containers[id]; !ok {
+		return fmt.Errorf("currustest: connect %s: %w", id, currus.ErrNotFound)
+	}
+	if _, ok := e.netMembers[net]; !ok {
+		e.netMembers[net] = make(map[currus.ContainerID]struct{})
+	}
+	e.netMembers[net][id] = struct{}{}
+
+	return nil
+}
+
+// DisconnectContainer implements currus.Networker.
+func (e *Engine) DisconnectContainer(_ context.Context, net currus.NetworkID, id currus.ContainerID, _ currus.DisconnectOpts) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if _, ok := e.containers[id]; !ok {
+		return fmt.Errorf("currustest: disconnect %s: %w", id, currus.ErrNotFound)
+	}
+	if members, ok := e.netMembers[net]; ok {
+		delete(members, id)
+		if len(members) == 0 {
+			delete(e.netMembers, net)
+		}
+	}
+
+	return nil
+}
+
+// Endpoint implements currus.EndpointReporter.
+// Returns a synthetic endpoint suitable for tests.
+func (e *Engine) Endpoint() currus.Endpoint {
+	return currus.Endpoint{Host: "unix:///var/run/fake.sock"}
+}
+
+// NetworkMembers returns the set of container IDs currently attached to net.
+// Intended for use in tests that need to assert network membership.
+func (e *Engine) NetworkMembers(net currus.NetworkID) []currus.ContainerID {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	members := e.netMembers[net]
+	out := make([]currus.ContainerID, 0, len(members))
+	for id := range members {
+		out = append(out, id)
+	}
+
+	return out
 }
 
 // CreateVolume implements currus.Volumer.

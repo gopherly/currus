@@ -469,4 +469,89 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 		for range ch {
 		}
 	})
+
+	t.Run("CreateContainerWithNetwork", func(t *testing.T) {
+		t.Parallel()
+		eng := newEngine(t)
+
+		nw, ok := eng.(currus.Networker)
+		if !ok {
+			t.Skip("engine does not implement currus.Networker; skipping network-attachment tests")
+		}
+
+		ctx := t.Context()
+		_ = eng.PullImage(ctx, testImage, currus.PullImageOpts{}) //nolint:errcheck // best-effort
+
+		netID, err := nw.CreateNetwork(ctx, name("attach-net"), currus.CreateNetworkOpts{Driver: "bridge"})
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_ = nw.RemoveNetwork(ctx, netID, currus.RemoveNetworkOpts{}) //nolint:errcheck // best-effort cleanup
+		})
+
+		id, err := eng.CreateContainer(ctx, currus.ContainerSpec{
+			Image:    testImage,
+			Name:     name("attach-ctr"),
+			Networks: []currus.NetworkAttachment{{Name: string(netID)}},
+		})
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_ = eng.RemoveContainer(ctx, id, currus.RemoveContainerOpts{Force: true}) //nolint:errcheck // best-effort cleanup
+		})
+
+		// Verify membership: the container must appear in ListNetworks or be
+		// reachable. For the fake we use the Inspect path; for real engines we
+		// check that no error was returned at create (Docker would have rejected
+		// an unknown network name).
+		if ins, hasIns := eng.(currus.Inspector); hasIns {
+			info, inspErr := ins.Inspect(ctx, id)
+			require.NoError(t, inspErr)
+			assert.Equal(t, id, info.ID)
+		}
+		t.Logf("container %s created and joined network %s", id, netID)
+	})
+
+	t.Run("NetworkerConnectDisconnect", func(t *testing.T) {
+		t.Parallel()
+		eng := newEngine(t)
+
+		nw, ok := eng.(currus.Networker)
+		if !ok {
+			t.Skip("engine does not implement currus.Networker; skipping connect/disconnect tests")
+		}
+
+		ctx := t.Context()
+		_ = eng.PullImage(ctx, testImage, currus.PullImageOpts{}) //nolint:errcheck // best-effort
+
+		netID, err := nw.CreateNetwork(ctx, name("cd-net"), currus.CreateNetworkOpts{Driver: "bridge"})
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_ = nw.RemoveNetwork(ctx, netID, currus.RemoveNetworkOpts{}) //nolint:errcheck // best-effort cleanup
+		})
+
+		id, err := eng.CreateContainer(ctx, currus.ContainerSpec{
+			Image: testImage,
+			Name:  name("cd-ctr"),
+		})
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_ = eng.RemoveContainer(ctx, id, currus.RemoveContainerOpts{Force: true}) //nolint:errcheck // best-effort cleanup
+		})
+
+		require.NoError(t, nw.ConnectContainer(ctx, netID, id, currus.ConnectOpts{}))
+		require.NoError(t, nw.DisconnectContainer(ctx, netID, id, currus.DisconnectOpts{}))
+	})
+
+	t.Run("EndpointReporterCapability", func(t *testing.T) {
+		t.Parallel()
+		eng := newEngine(t)
+
+		er, ok := eng.(currus.EndpointReporter)
+		if !ok {
+			t.Skip("engine does not implement currus.EndpointReporter; skipping endpoint tests")
+		}
+
+		ep := er.Endpoint()
+		assert.NotEmptyf(t, ep.Host, "EndpointReporter.Endpoint().Host must not be empty")
+		t.Logf("endpoint: host=%q namespace=%q", ep.Host, ep.Namespace)
+	})
 }

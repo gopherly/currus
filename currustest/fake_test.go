@@ -59,6 +59,8 @@ func TestFakeSetLogs(t *testing.T) {
 	eng.SetLogs("nonexistent", "ignored")
 }
 
+// TestFakeRemoveImage verifies that RemoveImage removes a pulled image and
+// returns ErrNotFound on a second removal attempt.
 func TestFakeRemoveImage(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -74,6 +76,8 @@ func TestFakeRemoveImage(t *testing.T) {
 	assert.ErrorIs(t, err, currus.ErrNotFound)
 }
 
+// TestFakeTagImage verifies that TagImage adds a new tag to an existing image
+// and returns ErrNotFound when the source image is missing.
 func TestFakeTagImage(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -98,6 +102,8 @@ func TestFakeTagImage(t *testing.T) {
 	assert.ErrorIs(t, err, currus.ErrNotFound)
 }
 
+// TestFakeCopyToContainer verifies that CopyToContainer succeeds for an
+// existing container and returns ErrNotFound for an unknown container ID.
 func TestFakeCopyToContainer(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -113,6 +119,8 @@ func TestFakeCopyToContainer(t *testing.T) {
 	assert.ErrorIs(t, err, currus.ErrNotFound)
 }
 
+// TestFakeCopyFromContainer verifies that CopyFromContainer returns an empty
+// reader for an existing container and ErrNotFound for an unknown container ID.
 func TestFakeCopyFromContainer(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -133,6 +141,8 @@ func TestFakeCopyFromContainer(t *testing.T) {
 	assert.ErrorIs(t, err, currus.ErrNotFound)
 }
 
+// TestFakeContainerState verifies the container state transitions: empty for
+// unknown IDs, then created → running → exited across the lifecycle.
 func TestFakeContainerState(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -151,6 +161,8 @@ func TestFakeContainerState(t *testing.T) {
 	assert.Equal(t, "exited", eng.ContainerState(id))
 }
 
+// TestFakeNotFoundErrors verifies that every engine operation returns
+// ErrNotFound when given an unknown container or image ID.
 func TestFakeNotFoundErrors(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -221,6 +233,8 @@ func TestFakeNotFoundErrors(t *testing.T) {
 	})
 }
 
+// TestFakeConflictErrors verifies that operations on containers in the wrong
+// state return ErrConflict.
 func TestFakeConflictErrors(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -261,6 +275,8 @@ func TestFakeConflictErrors(t *testing.T) {
 	})
 }
 
+// TestFakeListContainersFilter verifies that ListContainers respects the All
+// flag, hiding non-running containers when All is false.
 func TestFakeListContainersFilter(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()

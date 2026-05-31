@@ -82,25 +82,53 @@
 //	    io.Copy(os.Stdout, rc)
 //	}
 //
+// # Network attachment
+//
+// Containers can join one or more networks at creation time by populating
+// [ContainerSpec.Networks]. The first network is attached before the
+// container starts; additional networks are connected immediately after
+// create. Both Docker and Podman honor this field; containerd ignores it.
+//
+//	id, err := eng.CreateContainer(ctx, currus.ContainerSpec{
+//	    Image:    "ghcr.io/example/sidecar:latest",
+//	    Name:     "kind-sidecar",
+//	    Networks: []currus.NetworkAttachment{{Name: "kind"}},
+//	})
+//
+// The [Networker] capability also exposes [Networker.ConnectContainer] and
+// [Networker.DisconnectContainer] for attaching and detaching after start.
+//
+// # Resolved endpoint
+//
+// The [EndpointReporter] capability exposes the URI the engine actually
+// connected to. This is useful when deriving the host socket path for a
+// bind-mount into a sidecar container:
+//
+//	sock := "/var/run/docker.sock"
+//	if er, ok := eng.(currus.EndpointReporter); ok {
+//	    sock = strings.TrimPrefix(er.Endpoint().Host, "unix://")
+//	}
+//
 // # Capability matrix
 //
 // The following table shows which capabilities each engine implements.
 // A "—" means the engine does not implement the interface; type-asserting
 // it yields ok == false.
 //
-//	Capability   │ Docker │ Podman │ containerd
-//	─────────────┼────────┼────────┼───────────
-//	Engine       │ ✓      │ ✓      │ ✓
-//	Logger       │ ✓      │ ✓      │ —
-//	Execer       │ ✓      │ ✓      │ —
-//	Inspector    │ ✓      │ ✓      │ —
-//	Stater       │ ✓      │ ✓      │ —
-//	Waiter       │ ✓      │ ✓      │ —
-//	Eventer      │ ✓      │ ✓      │ —
-//	Imager       │ ✓      │ ✓      │ —
-//	Networker    │ ✓      │ ✓      │ —
-//	Volumer      │ ✓      │ ✓      │ —
-//	Copier       │ ✓      │ ✓      │ —
+//	Capability       │ Docker │ Podman │ containerd
+//	─────────────────┼────────┼────────┼───────────
+//	Engine           │ ✓      │ ✓      │ ✓
+//	Logger           │ ✓      │ ✓      │ —
+//	Execer           │ ✓      │ ✓      │ —
+//	Inspector        │ ✓      │ ✓      │ —
+//	Stater           │ ✓      │ ✓      │ —
+//	Waiter           │ ✓      │ ✓      │ —
+//	Eventer          │ ✓      │ ✓      │ —
+//	Imager           │ ✓      │ ✓      │ —
+//	Networker        │ ✓      │ ✓      │ —
+//	Volumer          │ ✓      │ ✓      │ —
+//	Copier           │ ✓      │ ✓      │ —
+//	EndpointReporter │ ✓      │ ✓      │ ✓
 //
 // # Error handling
 //

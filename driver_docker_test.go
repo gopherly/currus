@@ -24,6 +24,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestBuildDockerCaps verifies that buildDockerCaps sets RootlessCapable
+// correctly for the Docker and Podman engine variants.
 func TestBuildDockerCaps(t *testing.T) {
 	t.Parallel()
 
@@ -34,6 +36,8 @@ func TestBuildDockerCaps(t *testing.T) {
 	assert.True(t, podmanCaps.RootlessCapable)
 }
 
+// TestDockerConvertMounts verifies that dockerConvertMounts maps
+// ContainerSpec mounts to the Moby host-config mount format.
 func TestDockerConvertMounts(t *testing.T) {
 	t.Parallel()
 
@@ -110,6 +114,8 @@ func TestDockerConvertPorts(t *testing.T) {
 	})
 }
 
+// TestDockerConvertRestartPolicy verifies that dockerConvertRestartPolicy
+// maps RestartPolicy modes and retry counts to the Moby container config.
 func TestDockerConvertRestartPolicy(t *testing.T) {
 	t.Parallel()
 
@@ -133,6 +139,8 @@ func TestDockerConvertRestartPolicy(t *testing.T) {
 	})
 }
 
+// TestDockerActorString verifies that dockerActorString returns the container
+// name when available and falls back to the actor ID otherwise.
 func TestDockerActorString(t *testing.T) {
 	t.Parallel()
 
@@ -155,6 +163,8 @@ func TestDockerActorString(t *testing.T) {
 	})
 }
 
+// TestDockerNetInputOutput verifies that dockerNetInput and dockerNetOutput
+// sum received and transmitted bytes across all network interfaces.
 func TestDockerNetInputOutput(t *testing.T) {
 	t.Parallel()
 

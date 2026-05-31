@@ -20,17 +20,40 @@ package currus
 // config, and Podman specgen. Growth is additive within the nested sub-structs
 // so callers that set only a few fields are unaffected by new additions.
 type ContainerSpec struct {
-	Image      string
-	Name       string
-	Command    []string
-	Args       []string
-	Env        []string
+	// Image is the container image reference (e.g. "docker.io/library/alpine:3.20").
+	Image string
+	// Name is an optional human-readable name assigned to the container.
+	Name string
+	// Command overrides the image ENTRYPOINT. Leave nil to use the image default.
+	Command []string
+	// Args are the arguments passed to Command, or to the image ENTRYPOINT when
+	// Command is nil.
+	Args []string
+	// Env holds environment variables in KEY=VALUE form.
+	Env []string
+	// WorkingDir sets the working directory for the container process. Leave
+	// empty to use the image default.
 	WorkingDir string
-	Labels     map[string]string
-	Mounts     []Mount
-	Ports      []Port
-	Resources  Resources
-	Restart    RestartPolicy
+	// Labels are arbitrary key/value metadata attached to the container.
+	Labels map[string]string
+	// Mounts lists filesystem mounts attached to the container.
+	Mounts []Mount
+	// Ports lists port bindings between the container and the host.
+	Ports []Port
+	// Resources constrains the CPU and memory available to the container.
+	Resources Resources
+	// Restart is the restart policy applied when the container exits.
+	Restart RestartPolicy
+	// Networks lists the networks to join at creation time, in order.
+	Networks []NetworkAttachment
+}
+
+// NetworkAttachment describes a single network a container should join.
+type NetworkAttachment struct {
+	// Name is the network name or ID to join (e.g. "kind").
+	Name string
+	// Aliases are optional extra DNS names for this container on the network.
+	Aliases []string
 }
 
 // MountType identifies the kind of filesystem mount.
@@ -47,28 +70,43 @@ const (
 
 // Mount describes a single filesystem mount attached to a container.
 type Mount struct {
-	Type     MountType
-	Source   string
-	Target   string
+	// Type identifies the kind of mount (bind, volume, or tmpfs).
+	Type MountType
+	// Source is the host path for bind mounts or the volume name for named volumes.
+	Source string
+	// Target is the absolute path inside the container where the mount is attached.
+	Target string
+	// ReadOnly makes the mount read-only when true.
 	ReadOnly bool
 }
 
 // Port describes a single port binding between container and host.
 type Port struct {
+	// Container is the port number exposed by the container.
 	Container uint16
-	Host      uint16
-	Protocol  string
+	// Host is the host port to bind to. Zero lets the engine pick a free port.
+	Host uint16
+	// Protocol is the transport protocol ("tcp" or "udp"). Defaults to "tcp"
+	// when empty.
+	Protocol string
 }
 
 // Resources constrains the CPU and memory available to a container.
 type Resources struct {
-	NanoCPUs    int64
+	// NanoCPUs is the CPU limit expressed in units of 1e-9 CPUs (e.g. 500_000_000
+	// for half a CPU). Zero means no limit.
+	NanoCPUs int64
+	// MemoryBytes is the memory limit in bytes. Zero means no limit.
 	MemoryBytes int64
 }
 
 // RestartPolicy describes when and how many times the engine should restart
 // a container after it exits.
 type RestartPolicy struct {
-	Mode       string
+	// Mode is the restart mode. Accepted values depend on the engine (e.g.
+	// "always", "on-failure", "unless-stopped"). Empty means no restart.
+	Mode string
+	// MaxRetries is the maximum number of restart attempts. Only meaningful
+	// with the "on-failure" mode; ignored otherwise.
 	MaxRetries int
 }

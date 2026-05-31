@@ -75,12 +75,16 @@ type containerdConfig struct {
 type containerdEngine struct {
 	cli       *containerd.Client
 	namespace string
+	socket    string // resolved socket path, e.g. "/run/containerd/containerd.sock"
 	logger    *slog.Logger
 	tracer    trace.TracerProvider
 }
 
-// Compile-time assertion that containerdEngine satisfies Engine.
-var _ Engine = (*containerdEngine)(nil)
+// Compile-time assertions.
+var (
+	_ Engine           = (*containerdEngine)(nil)
+	_ EndpointReporter = (*containerdEngine)(nil)
+)
 
 // newContainerdEngine creates a containerdEngine using the given containerdConfig.
 func newContainerdEngine(cfg containerdConfig) (*containerdEngine, error) {
@@ -107,6 +111,7 @@ func newContainerdEngine(cfg containerdConfig) (*containerdEngine, error) {
 	return &containerdEngine{
 		cli:       cli,
 		namespace: ns,
+		socket:    socket,
 		logger:    lg,
 		tracer:    cfg.Tracer,
 	}, nil
@@ -357,6 +362,16 @@ func ctrdContainerState(ctx context.Context, c containerd.Container) string {
 		return "paused"
 	default:
 		return strings.ToLower(string(status.Status))
+	}
+}
+
+// Endpoint implements the EndpointReporter capability.
+// Networks are not supported by the containerd driver; the ContainerSpec.Networks
+// field is silently ignored.
+func (e *containerdEngine) Endpoint() Endpoint {
+	return Endpoint{
+		Host:      "unix://" + e.socket,
+		Namespace: e.namespace,
 	}
 }
 

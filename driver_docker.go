@@ -76,23 +76,25 @@ type dockerEngine struct {
 	cli    *client.Client
 	kind   EngineKind
 	caps   Caps
+	host   string // resolved URI, e.g. "unix:///var/run/docker.sock"
 	logger *slog.Logger
 	tracer trace.TracerProvider
 }
 
 // Compile-time assertions.
 var (
-	_ Engine    = (*dockerEngine)(nil)
-	_ Logger    = (*dockerEngine)(nil)
-	_ Execer    = (*dockerEngine)(nil)
-	_ Inspector = (*dockerEngine)(nil)
-	_ Stater    = (*dockerEngine)(nil)
-	_ Waiter    = (*dockerEngine)(nil)
-	_ Eventer   = (*dockerEngine)(nil)
-	_ Imager    = (*dockerEngine)(nil)
-	_ Networker = (*dockerEngine)(nil)
-	_ Volumer   = (*dockerEngine)(nil)
-	_ Copier    = (*dockerEngine)(nil)
+	_ Engine           = (*dockerEngine)(nil)
+	_ Logger           = (*dockerEngine)(nil)
+	_ Execer           = (*dockerEngine)(nil)
+	_ Inspector        = (*dockerEngine)(nil)
+	_ Stater           = (*dockerEngine)(nil)
+	_ Waiter           = (*dockerEngine)(nil)
+	_ Eventer          = (*dockerEngine)(nil)
+	_ Imager           = (*dockerEngine)(nil)
+	_ Networker        = (*dockerEngine)(nil)
+	_ Volumer          = (*dockerEngine)(nil)
+	_ Copier           = (*dockerEngine)(nil)
+	_ EndpointReporter = (*dockerEngine)(nil)
 )
 
 // newDockerEngine creates a dockerEngine using the given dockerConfig.
@@ -125,10 +127,16 @@ func newDockerEngine(cfg dockerConfig) (*dockerEngine, error) {
 		kind = Podman
 	}
 
+	host := cfg.Host
+	if host == "" {
+		host = "unix://" + defaultDockerSocket
+	}
+
 	return &dockerEngine{
 		cli:    cli,
 		kind:   kind,
 		caps:   buildDockerCaps(cfg.Kind),
+		host:   host,
 		logger: lg,
 		tracer: cfg.Tracer,
 	}, nil
@@ -209,13 +217,35 @@ func (e *dockerEngine) CreateContainer(ctx context.Context, spec ContainerSpec) 
 		},
 	}
 
+	// Attach the first network at create time so the container is on it
+	// before it starts. Additional networks are connected after create.
+	var netCfg *network.NetworkingConfig
+	if len(spec.Networks) > 0 {
+		first := spec.Networks[0]
+		netCfg = &network.NetworkingConfig{
+			EndpointsConfig: map[string]*network.EndpointSettings{
+				first.Name: {Aliases: first.Aliases},
+			},
+		}
+	}
+
 	result, err := e.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
-		Config:     cfg,
-		HostConfig: hc,
-		Name:       spec.Name,
+		Config:           cfg,
+		HostConfig:       hc,
+		NetworkingConfig: netCfg,
+		Name:             spec.Name,
 	})
 	if err != nil {
 		return "", mapDockerErr(fmt.Errorf("docker: create container: %w", err))
+	}
+
+	for _, n := range spec.Networks[1:] {
+		if _, nerr := e.cli.NetworkConnect(ctx, n.Name, client.NetworkConnectOptions{
+			Container:      result.ID,
+			EndpointConfig: &network.EndpointSettings{Aliases: n.Aliases},
+		}); nerr != nil {
+			return "", mapDockerErr(fmt.Errorf("docker: connect container %s to network %s: %w", result.ID, n.Name, nerr))
+		}
 	}
 
 	e.logger.DebugContext(ctx, "container created", "id", result.ID)
@@ -607,6 +637,39 @@ func (e *dockerEngine) RemoveNetwork(ctx context.Context, id NetworkID, _ Remove
 	}
 
 	return nil
+}
+
+// ConnectContainer implements the Networker capability.
+func (e *dockerEngine) ConnectContainer(ctx context.Context, net NetworkID, id ContainerID, o ConnectOpts) error {
+	e.logger.DebugContext(ctx, "connect container to network", "id", id, "network", net)
+	_, err := e.cli.NetworkConnect(ctx, string(net), client.NetworkConnectOptions{
+		Container:      string(id),
+		EndpointConfig: &network.EndpointSettings{Aliases: o.Aliases},
+	})
+	if err != nil {
+		return mapDockerErr(fmt.Errorf("docker: connect container %s to network %s: %w", id, net, err))
+	}
+
+	return nil
+}
+
+// DisconnectContainer implements the Networker capability.
+func (e *dockerEngine) DisconnectContainer(ctx context.Context, net NetworkID, id ContainerID, o DisconnectOpts) error {
+	e.logger.DebugContext(ctx, "disconnect container from network", "id", id, "network", net)
+	_, err := e.cli.NetworkDisconnect(ctx, string(net), client.NetworkDisconnectOptions{
+		Container: string(id),
+		Force:     o.Force,
+	})
+	if err != nil {
+		return mapDockerErr(fmt.Errorf("docker: disconnect container %s from network %s: %w", id, net, err))
+	}
+
+	return nil
+}
+
+// Endpoint implements the EndpointReporter capability.
+func (e *dockerEngine) Endpoint() Endpoint {
+	return Endpoint{Host: e.host}
 }
 
 // CreateVolume implements the Volumer capability.
