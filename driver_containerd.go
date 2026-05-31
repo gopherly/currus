@@ -137,6 +137,7 @@ func (e *containerdEngine) Ping(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("containerd: ping: %w", err)
 	}
+
 	return nil
 }
 
@@ -153,6 +154,7 @@ func (e *containerdEngine) PullImage(ctx context.Context, ref string, _ PullImag
 	if err != nil {
 		return mapCtrdErr(fmt.Errorf("containerd: pull %s: %w", ref, err))
 	}
+
 	return nil
 }
 
@@ -196,6 +198,7 @@ func (e *containerdEngine) CreateContainer(ctx context.Context, spec ContainerSp
 	}
 
 	e.logger.DebugContext(ctx, "container created", "id", c.ID())
+
 	return ContainerID(c.ID()), nil
 }
 
@@ -218,6 +221,7 @@ func (e *containerdEngine) StartContainer(ctx context.Context, id ContainerID) e
 		_, _ = task.Delete(nctx) //nolint:errcheck // best-effort cleanup
 		return mapCtrdErr(fmt.Errorf("containerd: start task %s: %w", id, err))
 	}
+
 	return nil
 }
 
@@ -237,6 +241,7 @@ func (e *containerdEngine) StopContainer(ctx context.Context, id ContainerID, o 
 		if cerrdefs.IsNotFound(err) {
 			return fmt.Errorf("containerd: stop %s: %w", id, ErrNotFound)
 		}
+
 		return fmt.Errorf("containerd: get task %s: %w", id, err)
 	}
 
@@ -262,6 +267,7 @@ func (e *containerdEngine) StopContainer(ctx context.Context, id ContainerID, o 
 		<-exitCh
 		_, _ = task.Delete(nctx) //nolint:errcheck // best-effort cleanup
 	}
+
 	return nil
 }
 
@@ -293,6 +299,7 @@ func (e *containerdEngine) RemoveContainer(ctx context.Context, id ContainerID, 
 	if err = c.Delete(nctx, containerd.WithSnapshotCleanup); err != nil {
 		return mapCtrdErr(fmt.Errorf("containerd: delete container %s: %w", id, err))
 	}
+
 	return nil
 }
 
@@ -326,6 +333,7 @@ func (e *containerdEngine) ListContainers(ctx context.Context, o ListContainersO
 			Labels: labels,
 		})
 	}
+
 	return out, nil
 }
 

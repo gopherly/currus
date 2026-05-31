@@ -95,6 +95,7 @@ func run() error {
 	}
 
 	logger.Info("done")
+
 	return nil
 }
 

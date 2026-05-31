@@ -106,7 +106,7 @@ func TestCtrdCtx(t *testing.T) {
 	const ns = "currus-test-ns"
 	e := &containerdEngine{namespace: ns, logger: slog.Default()}
 	got, ok := namespaces.Namespace(e.ctrdCtx(t.Context()))
-	require.True(t, ok, "namespace not set in context")
+	require.Truef(t, ok, "namespace not set in context for %s", ns)
 	assert.Equal(t, ns, got)
 }
 
@@ -119,7 +119,7 @@ func TestNewContainerdEngineDefaults(t *testing.T) {
 	sock := filepath.Join(t.TempDir(), "containerd.sock")
 	lc := &net.ListenConfig{}
 	l, err := lc.Listen(t.Context(), "unix", sock)
-	require.NoError(t, err, "create unix socket")
+	require.NoErrorf(t, err, "create unix socket %s", sock)
 	t.Cleanup(func() { assert.NoError(t, l.Close()) })
 
 	e, err := newContainerdEngine(containerdConfig{Socket: sock})

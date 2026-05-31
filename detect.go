@@ -39,11 +39,11 @@ func New(ctx context.Context, opts ...Option) (Engine, error) {
 	cfg := buildEngineConfig(opts)
 
 	if cfg.kind != "" {
-		return openKind(ctx, cfg.kind, cfg)
+		return openKind(cfg.kind, cfg)
 	}
 
 	if envKind := engineKindFromEnv(); envKind != "" {
-		return openKind(ctx, envKind, cfg)
+		return openKind(envKind, cfg)
 	}
 
 	return autoDetect(ctx, cfg)
@@ -60,6 +60,7 @@ func MustNew(ctx context.Context, opts ...Option) Engine {
 	if err != nil {
 		panic(fmt.Sprintf("currus.MustNew: %v", err))
 	}
+
 	return eng
 }
 
@@ -74,11 +75,12 @@ func buildEngineConfig(opts []Option) engineConfig {
 	if cfg.logger == nil {
 		cfg.logger = slog.Default()
 	}
+
 	return cfg
 }
 
 // openKind constructs the engine for the given kind using the provided config.
-func openKind(ctx context.Context, kind EngineKind, cfg engineConfig) (Engine, error) {
+func openKind(kind EngineKind, cfg engineConfig) (Engine, error) {
 	switch kind {
 	case Docker:
 		host := ""
@@ -89,6 +91,7 @@ func openKind(ctx context.Context, kind EngineKind, cfg engineConfig) (Engine, e
 		if err != nil {
 			return nil, fmt.Errorf("currus: Docker TLS config: %w", err)
 		}
+
 		return newDockerEngine(dockerConfig{
 			Host:   host,
 			Kind:   dockerKindDocker,
@@ -105,6 +108,7 @@ func openKind(ctx context.Context, kind EngineKind, cfg engineConfig) (Engine, e
 		if err != nil {
 			return nil, fmt.Errorf("currus: Podman TLS config: %w", err)
 		}
+
 		return newDockerEngine(dockerConfig{
 			Host:   host,
 			Kind:   dockerKindPodman,
@@ -119,6 +123,7 @@ func openKind(ctx context.Context, kind EngineKind, cfg engineConfig) (Engine, e
 			socket = cfg.endpoint.Host
 			ns = cfg.endpoint.Namespace
 		}
+
 		return newContainerdEngine(containerdConfig{
 			Socket:    socket,
 			Namespace: ns,
@@ -179,16 +184,19 @@ func autoDetect(ctx context.Context, cfg engineConfig) (Engine, error) {
 		if err != nil {
 			cfg.logger.DebugContext(ctx, "engine candidate skipped (open failed)",
 				"kind", c.kind, "socket", c.socket, "err", err)
+
 			continue
 		}
 		if err = eng.Ping(ctx); err != nil {
 			cfg.logger.DebugContext(ctx, "engine candidate skipped (ping failed)",
 				"kind", c.kind, "socket", c.socket, "err", err)
 			_ = eng.Close() //nolint:errcheck // best-effort close on failed candidate
+
 			continue
 		}
 		cfg.logger.DebugContext(ctx, "engine detected",
 			"kind", c.kind, "socket", c.socket)
+
 		return eng, nil
 	}
 
@@ -212,6 +220,7 @@ func endpointTLS(ep *Endpoint) *TLSConfig {
 	if ep == nil {
 		return nil
 	}
+
 	return ep.TLS
 }
 
@@ -225,5 +234,6 @@ func podmanRootlessSocket() string {
 	if err != nil {
 		return ""
 	}
+
 	return home + "/.local/share/containers/podman/machine/podman.sock"
 }

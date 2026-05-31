@@ -139,6 +139,7 @@ func buildDockerCaps(kind dockerDriverKind) Caps {
 	if kind == dockerKindPodman {
 		caps.RootlessCapable = true
 	}
+
 	return caps
 }
 
@@ -158,6 +159,7 @@ func (e *dockerEngine) Ping(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("docker: ping: %w", err)
 	}
+
 	return nil
 }
 
@@ -176,6 +178,7 @@ func (e *dockerEngine) PullImage(ctx context.Context, ref string, _ PullImageOpt
 	if err = resp.Wait(ctx); err != nil {
 		return mapDockerErr(fmt.Errorf("docker: pull %s: %w", ref, err))
 	}
+
 	return nil
 }
 
@@ -216,6 +219,7 @@ func (e *dockerEngine) CreateContainer(ctx context.Context, spec ContainerSpec) 
 	}
 
 	e.logger.DebugContext(ctx, "container created", "id", result.ID)
+
 	return ContainerID(result.ID), nil
 }
 
@@ -226,6 +230,7 @@ func (e *dockerEngine) StartContainer(ctx context.Context, id ContainerID) error
 	if err != nil {
 		return mapDockerErr(fmt.Errorf("docker: start %s: %w", id, err))
 	}
+
 	return nil
 }
 
@@ -241,6 +246,7 @@ func (e *dockerEngine) StopContainer(ctx context.Context, id ContainerID, o Stop
 	if err != nil {
 		return mapDockerErr(fmt.Errorf("docker: stop %s: %w", id, err))
 	}
+
 	return nil
 }
 
@@ -254,6 +260,7 @@ func (e *dockerEngine) RemoveContainer(ctx context.Context, id ContainerID, o Re
 	if err != nil {
 		return mapDockerErr(fmt.Errorf("docker: remove %s: %w", id, err))
 	}
+
 	return nil
 }
 
@@ -280,6 +287,7 @@ func (e *dockerEngine) ListContainers(ctx context.Context, o ListContainersOpts)
 			Labels: c.Labels,
 		})
 	}
+
 	return out, nil
 }
 
@@ -299,6 +307,7 @@ func (e *dockerEngine) ContainerLogs(ctx context.Context, id ContainerID, o Cont
 	if err != nil {
 		return nil, mapDockerErr(fmt.Errorf("docker: logs %s: %w", id, err))
 	}
+
 	return logsResult, nil
 }
 
@@ -340,6 +349,7 @@ func (e *dockerEngine) Exec(ctx context.Context, id ContainerID, o ExecOpts) (Ex
 	if o.AttachStderr {
 		result.Stderr = &stderr
 	}
+
 	return result, nil
 }
 
@@ -386,6 +396,7 @@ func (e *dockerEngine) Inspect(ctx context.Context, id ContainerID) (ContainerIn
 			ReadOnly: !m.RW,
 		})
 	}
+
 	return info, nil
 }
 
@@ -425,6 +436,7 @@ func dockerCPUPercent(s container.StatsResponse) float64 {
 	if systemDelta <= 0 || cpuDelta < 0 {
 		return 0
 	}
+
 	return (cpuDelta / systemDelta) * numCPUs * 100.0
 }
 
@@ -433,6 +445,7 @@ func dockerNetInput(s container.StatsResponse) uint64 {
 	for _, n := range s.Networks {
 		total += n.RxBytes
 	}
+
 	return total
 }
 
@@ -441,6 +454,7 @@ func dockerNetOutput(s container.StatsResponse) uint64 {
 	for _, n := range s.Networks {
 		total += n.TxBytes
 	}
+
 	return total
 }
 
@@ -474,6 +488,7 @@ func (e *dockerEngine) WaitContainer(ctx context.Context, id ContainerID, o Wait
 			out <- WaitResult{Error: ctx.Err().Error()}
 		}
 	}()
+
 	return out, nil
 }
 
@@ -499,12 +514,14 @@ func (e *dockerEngine) Events(ctx context.Context) (<-chan Event, error) {
 				if err != nil {
 					e.logger.DebugContext(ctx, "events stream closed", "err", err)
 				}
+
 				return
 			case <-ctx.Done():
 				return
 			}
 		}
 	}()
+
 	return out, nil
 }
 
@@ -512,6 +529,7 @@ func dockerActorString(a events.Actor) string {
 	if name, ok := a.Attributes["name"]; ok {
 		return name
 	}
+
 	return a.ID
 }
 
@@ -529,6 +547,7 @@ func (e *dockerEngine) ListImages(ctx context.Context, o ListImagesOpts) ([]Imag
 			SizeBytes: img.Size,
 		})
 	}
+
 	return out, nil
 }
 
@@ -538,6 +557,7 @@ func (e *dockerEngine) RemoveImage(ctx context.Context, ref string, o RemoveImag
 	if err != nil {
 		return mapDockerErr(fmt.Errorf("docker: remove image %s: %w", ref, err))
 	}
+
 	return nil
 }
 
@@ -547,6 +567,7 @@ func (e *dockerEngine) TagImage(ctx context.Context, src, dst string) error {
 	if err != nil {
 		return mapDockerErr(fmt.Errorf("docker: tag image %s -> %s: %w", src, dst, err))
 	}
+
 	return nil
 }
 
@@ -556,6 +577,7 @@ func (e *dockerEngine) CreateNetwork(ctx context.Context, name string, o CreateN
 	if err != nil {
 		return "", mapDockerErr(fmt.Errorf("docker: create network %s: %w", name, err))
 	}
+
 	return NetworkID(result.ID), nil
 }
 
@@ -573,6 +595,7 @@ func (e *dockerEngine) ListNetworks(ctx context.Context, _ ListNetworksOpts) ([]
 			Driver: n.Driver,
 		})
 	}
+
 	return out, nil
 }
 
@@ -582,6 +605,7 @@ func (e *dockerEngine) RemoveNetwork(ctx context.Context, id NetworkID, _ Remove
 	if err != nil {
 		return mapDockerErr(fmt.Errorf("docker: remove network %s: %w", id, err))
 	}
+
 	return nil
 }
 
@@ -594,6 +618,7 @@ func (e *dockerEngine) CreateVolume(ctx context.Context, name string, o CreateVo
 	if err != nil {
 		return "", mapDockerErr(fmt.Errorf("docker: create volume %s: %w", name, err))
 	}
+
 	return VolumeID(result.Volume.Name), nil
 }
 
@@ -611,6 +636,7 @@ func (e *dockerEngine) ListVolumes(ctx context.Context, _ ListVolumesOpts) ([]Vo
 			Mountpoint: v.Mountpoint,
 		})
 	}
+
 	return out, nil
 }
 
@@ -620,6 +646,7 @@ func (e *dockerEngine) RemoveVolume(ctx context.Context, id VolumeID, o RemoveVo
 	if err != nil {
 		return mapDockerErr(fmt.Errorf("docker: remove volume %s: %w", id, err))
 	}
+
 	return nil
 }
 
@@ -633,6 +660,7 @@ func (e *dockerEngine) CopyToContainer(ctx context.Context, id ContainerID, o Co
 	if err != nil {
 		return mapDockerErr(fmt.Errorf("docker: copy to container %s: %w", id, err))
 	}
+
 	return nil
 }
 
@@ -645,6 +673,7 @@ func (e *dockerEngine) CopyFromContainer(ctx context.Context, id ContainerID, o 
 	if err != nil {
 		return nil, mapDockerErr(fmt.Errorf("docker: copy from container %s: %w", id, err))
 	}
+
 	return result.Content, nil
 }
 
@@ -679,6 +708,7 @@ func dockerConvertMounts(mounts []Mount) []mount.Mount {
 			ReadOnly: m.ReadOnly,
 		})
 	}
+
 	return out
 }
 
@@ -703,6 +733,7 @@ func dockerConvertPorts(ports []Port) network.PortMap {
 		}
 		pm[containerPort] = append(pm[containerPort], binding)
 	}
+
 	return pm
 }
 
@@ -711,6 +742,7 @@ func dockerConvertRestartPolicy(rp RestartPolicy) container.RestartPolicy {
 	if rp.Mode == "" {
 		return container.RestartPolicy{Name: container.RestartPolicyDisabled}
 	}
+
 	return container.RestartPolicy{
 		Name:              container.RestartPolicyMode(rp.Mode),
 		MaximumRetryCount: rp.MaxRetries,

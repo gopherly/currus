@@ -144,6 +144,7 @@ func tlsConfigFromCurrus(cfg *TLSConfig) (*tls.Config, error) {
 		}
 		tc.Certificates = []tls.Certificate{cert}
 	}
+
 	return tc, nil
 }
 

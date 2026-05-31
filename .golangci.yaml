@@ -232,6 +232,11 @@ linters:
     #       // Output: hello
     - testableexamples
 
+    # testifylint: enforces correct github.com/stretchr/testify usage.
+    # BAD:  assert.NoError(t, err); use(got) // flow depends on err being nil
+    # GOOD: require.NoError(t, err); use(got)
+    - testifylint
+
     # === COMPLEXITY ===
     # cyclop: cyclomatic complexity per function (number of independent paths).
     - cyclop
@@ -286,6 +291,27 @@ linters:
 
     # dogsled: flag too many blank identifiers in a single assignment.
     - dogsled
+
+    # prealloc: suggests pre-allocating slices that are grown inside loops.
+    # BAD:  var out []T; for _, v := range in { out = append(out, f(v)) }
+    # GOOD: out := make([]T, 0, len(in)); for _, v := range in { ... }
+    - prealloc
+
+    # unparam: reports unused function params and always-identical returns.
+    # BAD:  func f(a, b int) int { return a } // b is never used
+    # GOOD: func f(a int) int { return a }
+    - unparam
+
+    # === STYLE ===
+    # nlreturn: require a blank line before return/branch statements.
+    - nlreturn
+
+    # === STRUCT TAGS ===
+    # tagliatelle: enforce struct tag naming conventions (snake_case keys).
+    - tagliatelle
+
+    # tagalign: keep struct tags aligned and ordered (has autofix).
+    - tagalign
 
   settings:
     bidichk:
@@ -542,6 +568,62 @@ linters:
       strconcat: true
       bool-format: true
       hex-format: true
+      # Flag string concatenation inside loops (prefer strings.Builder).
+      concat-loop: true
+
+    testifylint:
+      # Enable every checker, then opt out where it does not fit this repo.
+      enable-all: true
+      formatter:
+        # Validate Sprintf-style format strings passed as assert messages.
+        check-format-string: true
+        # Prefer the *f variants (Equalf, Errorf) when a message is supplied.
+        require-f-funcs: true
+      require-error:
+        # Force require (not assert) for these when the result gates later code.
+        fn-pattern: ^(Errorf?|NoErrorf?)$
+      expected-actual:
+        # Order is assert.Equal(expected, actual); match vars named "expected".
+        pattern: ^expected
+      bool-compare:
+        ignore-custom-types: false
+      go-require:
+        ignore-http-handlers: false
+      suite-extra-assert-call:
+        mode: remove
+
+    tagliatelle:
+      case:
+        rules:
+          json: snake
+          yaml: snake
+          toml: snake
+          mapstructure: snake
+
+    tagalign:
+      # Align and sort struct tags consistently (autofixable).
+      align: true
+      sort: true
+      order:
+        - json
+        - yaml
+        - toml
+        - mapstructure
+
+    prealloc:
+      # NOTE: prealloc is a micro-optimization; keep it conservative to avoid noise.
+      # Only flag obvious cases on range loops, skip classic for loops.
+      simple: true
+      range-loops: true
+      for-loops: false
+
+    nlreturn:
+      # Allow tiny blocks to keep return inline without requiring a blank line.
+      block-size: 2
+
+    unparam:
+      # Keep exported API params even when unused (stable public surface).
+      check-exported: false
 
     asasalint:
       # fmt/log-style variadic funcs handle []any correctly; keep their exclusions.

@@ -68,7 +68,7 @@ func TestEngineKindFromEnv(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.value, func(t *testing.T) {
 			t.Setenv("CONTAINER_ENGINE", tc.value)
-			assert.Equal(t, tc.want, engineKindFromEnv(), "CONTAINER_ENGINE=%q", tc.value)
+			assert.Equalf(t, tc.want, engineKindFromEnv(), "CONTAINER_ENGINE=%q", tc.value)
 		})
 	}
 }
@@ -105,7 +105,7 @@ func TestPodmanRootlessSocket(t *testing.T) {
 	t.Run("XDG_RUNTIME_DIR unset falls back to home dir", func(t *testing.T) {
 		t.Setenv("XDG_RUNTIME_DIR", "")
 		home, err := os.UserHomeDir()
-		require.NoError(t, err, "determine home dir")
+		require.NoErrorf(t, err, "determine home dir %s", home)
 		want := home + "/.local/share/containers/podman/machine/podman.sock"
 		assert.Equal(t, want, podmanRootlessSocket())
 	})
@@ -115,7 +115,7 @@ func TestPodmanRootlessSocket(t *testing.T) {
 // that wraps ErrUnsupported.
 func TestOpenKindUnsupported(t *testing.T) {
 	t.Parallel()
-	_, err := openKind(t.Context(), "bogus", buildEngineConfig(nil))
+	_, err := openKind("bogus", buildEngineConfig(nil))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrUnsupported)
 }
@@ -125,7 +125,7 @@ func TestOpenKindUnsupported(t *testing.T) {
 func TestOpenKindDockerTLSError(t *testing.T) {
 	t.Parallel()
 	ep := Endpoint{TLS: &TLSConfig{Cert: []byte("not-a-cert"), Key: []byte("not-a-key")}}
-	_, err := openKind(t.Context(), Docker, buildEngineConfig([]Option{WithEndpoint(ep)}))
+	_, err := openKind(Docker, buildEngineConfig([]Option{WithEndpoint(ep)}))
 	assert.Error(t, err)
 }
 
@@ -134,7 +134,7 @@ func TestOpenKindDockerTLSError(t *testing.T) {
 func TestOpenKindPodmanTLSError(t *testing.T) {
 	t.Parallel()
 	ep := Endpoint{TLS: &TLSConfig{Cert: []byte("not-a-cert"), Key: []byte("not-a-key")}}
-	_, err := openKind(t.Context(), Podman, buildEngineConfig([]Option{WithEndpoint(ep)}))
+	_, err := openKind(Podman, buildEngineConfig([]Option{WithEndpoint(ep)}))
 	assert.Error(t, err)
 }
 
@@ -142,7 +142,7 @@ func TestOpenKindPodmanTLSError(t *testing.T) {
 // the Docker backend. The moby client is lazy so no daemon is required.
 func TestOpenKindDocker(t *testing.T) {
 	t.Parallel()
-	eng, err := openKind(t.Context(), Docker, buildEngineConfig(nil))
+	eng, err := openKind(Docker, buildEngineConfig(nil))
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, eng.Close()) })
 	assert.Equal(t, Docker, eng.Engine())
@@ -151,7 +151,7 @@ func TestOpenKindDocker(t *testing.T) {
 // TestOpenKindPodman verifies that openKind returns a Podman-kind engine.
 func TestOpenKindPodman(t *testing.T) {
 	t.Parallel()
-	eng, err := openKind(t.Context(), Podman, buildEngineConfig(nil))
+	eng, err := openKind(Podman, buildEngineConfig(nil))
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, eng.Close()) })
 	assert.Equal(t, Podman, eng.Engine())
@@ -165,11 +165,11 @@ func TestOpenKindContainerd(t *testing.T) {
 	sock := filepath.Join(t.TempDir(), "containerd.sock")
 	lc := &net.ListenConfig{}
 	l, err := lc.Listen(t.Context(), "unix", sock)
-	require.NoError(t, err, "create unix socket")
+	require.NoErrorf(t, err, "create unix socket %s", sock)
 	t.Cleanup(func() { assert.NoError(t, l.Close()) })
 
 	cfg := buildEngineConfig([]Option{WithEndpoint(Endpoint{Host: sock, Namespace: "testns"})})
-	eng, err := openKind(t.Context(), Containerd, cfg)
+	eng, err := openKind(Containerd, cfg)
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, eng.Close()) })
 	assert.Equal(t, Containerd, eng.Engine())

@@ -140,7 +140,7 @@ func TestWithTracerProvider(t *testing.T) {
 func testCertPEM(t *testing.T) ([]byte, []byte) {
 	t.Helper()
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	require.NoError(t, err, "generate key")
+	require.NoErrorf(t, err, "generate key")
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject:      pkix.Name{CommonName: "currus-test"},
@@ -148,10 +148,11 @@ func testCertPEM(t *testing.T) ([]byte, []byte) {
 		NotAfter:     time.Now().Add(time.Hour),
 	}
 	certDER, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &priv.PublicKey, priv)
-	require.NoError(t, err, "create certificate")
+	require.NoErrorf(t, err, "create certificate")
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
 	keyDER, err := x509.MarshalECPrivateKey(priv)
-	require.NoError(t, err, "marshal key")
+	require.NoErrorf(t, err, "marshal key")
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+
 	return certPEM, keyPEM
 }

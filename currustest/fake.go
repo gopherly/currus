@@ -107,6 +107,7 @@ func (e *Engine) PullImage(_ context.Context, ref string, _ currus.PullImageOpts
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.images[ref] = true
+
 	return nil
 }
 
@@ -120,6 +121,7 @@ func (e *Engine) CreateContainer(_ context.Context, spec currus.ContainerSpec) (
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.containers[id] = &fakeContainer{spec: spec, state: "created"}
+
 	return id, nil
 }
 
@@ -136,6 +138,7 @@ func (e *Engine) StartContainer(_ context.Context, id currus.ContainerID) error 
 	}
 	c.state = "running"
 	c.logs = fmt.Sprintf("[%s] container started\n", id)
+
 	return nil
 }
 
@@ -151,6 +154,7 @@ func (e *Engine) StopContainer(_ context.Context, id currus.ContainerID, _ curru
 		return fmt.Errorf("currustest: stop %s: %w: not running", id, currus.ErrConflict)
 	}
 	c.state = "exited"
+
 	return nil
 }
 
@@ -166,6 +170,7 @@ func (e *Engine) RemoveContainer(_ context.Context, id currus.ContainerID, o cur
 		return fmt.Errorf("currustest: remove %s: %w: container is running", id, currus.ErrConflict)
 	}
 	delete(e.containers, id)
+
 	return nil
 }
 
@@ -186,6 +191,7 @@ func (e *Engine) ListContainers(_ context.Context, o currus.ListContainersOpts) 
 			Labels: c.spec.Labels,
 		})
 	}
+
 	return out, nil
 }
 
@@ -198,6 +204,7 @@ func (e *Engine) ContainerLogs(_ context.Context, id currus.ContainerID, _ curru
 	if !ok {
 		return nil, fmt.Errorf("currustest: logs %s: %w", id, currus.ErrNotFound)
 	}
+
 	return io.NopCloser(strings.NewReader(c.logs)), nil
 }
 
@@ -217,6 +224,7 @@ func (e *Engine) Exec(_ context.Context, id currus.ContainerID, o currus.ExecOpt
 	if o.AttachStderr {
 		result.Stderr = bytes.NewBufferString("")
 	}
+
 	return result, nil
 }
 
@@ -228,6 +236,7 @@ func (e *Engine) Inspect(_ context.Context, id currus.ContainerID) (currus.Conta
 	if !ok {
 		return currus.ContainerInfo{}, fmt.Errorf("currustest: inspect %s: %w", id, currus.ErrNotFound)
 	}
+
 	return currus.ContainerInfo{
 		ID:     id,
 		Name:   c.spec.Name,
@@ -250,6 +259,7 @@ func (e *Engine) Stats(_ context.Context, id currus.ContainerID, _ currus.StatsO
 	if _, ok := e.containers[id]; !ok {
 		return currus.ContainerStats{}, fmt.Errorf("currustest: stats %s: %w", id, currus.ErrNotFound)
 	}
+
 	return currus.ContainerStats{}, nil
 }
 
@@ -267,6 +277,7 @@ func (e *Engine) WaitContainer(_ context.Context, id currus.ContainerID, _ curru
 	// The fake does not support real blocking wait; signal exit 0 immediately.
 	out <- currus.WaitResult{StatusCode: 0}
 	close(out)
+
 	return out, nil
 }
 
@@ -275,6 +286,7 @@ func (e *Engine) WaitContainer(_ context.Context, id currus.ContainerID, _ curru
 func (e *Engine) Events(_ context.Context) (<-chan currus.Event, error) {
 	out := make(chan currus.Event)
 	close(out)
+
 	return out, nil
 }
 
@@ -296,6 +308,7 @@ func (e *Engine) ListImages(_ context.Context, _ currus.ListImagesOpts) ([]curru
 	for ref := range e.images {
 		out = append(out, currus.Image{ID: ref, Tags: []string{ref}})
 	}
+
 	return out, nil
 }
 
@@ -307,6 +320,7 @@ func (e *Engine) RemoveImage(_ context.Context, ref string, _ currus.RemoveImage
 		return fmt.Errorf("currustest: remove image %s: %w", ref, currus.ErrNotFound)
 	}
 	delete(e.images, ref)
+
 	return nil
 }
 
@@ -318,6 +332,7 @@ func (e *Engine) TagImage(_ context.Context, src, dst string) error {
 		return fmt.Errorf("currustest: tag image %s: %w", src, currus.ErrNotFound)
 	}
 	e.images[dst] = true
+
 	return nil
 }
 
@@ -327,6 +342,7 @@ func (e *Engine) CreateNetwork(_ context.Context, name string, o currus.CreateNe
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.networks[id] = currus.Network{ID: id, Name: name, Driver: o.Driver}
+
 	return id, nil
 }
 
@@ -338,6 +354,7 @@ func (e *Engine) ListNetworks(_ context.Context, _ currus.ListNetworksOpts) ([]c
 	for _, n := range e.networks {
 		out = append(out, n)
 	}
+
 	return out, nil
 }
 
@@ -346,6 +363,7 @@ func (e *Engine) RemoveNetwork(_ context.Context, id currus.NetworkID, _ currus.
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	delete(e.networks, id)
+
 	return nil
 }
 
@@ -355,6 +373,7 @@ func (e *Engine) CreateVolume(_ context.Context, name string, o currus.CreateVol
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.volumes[id] = currus.Volume{ID: id, Driver: o.Driver, Mountpoint: "/tmp/" + name}
+
 	return id, nil
 }
 
@@ -366,6 +385,7 @@ func (e *Engine) ListVolumes(_ context.Context, _ currus.ListVolumesOpts) ([]cur
 	for _, v := range e.volumes {
 		out = append(out, v)
 	}
+
 	return out, nil
 }
 
@@ -374,6 +394,7 @@ func (e *Engine) RemoveVolume(_ context.Context, id currus.VolumeID, _ currus.Re
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	delete(e.volumes, id)
+
 	return nil
 }
 
@@ -384,6 +405,7 @@ func (e *Engine) CopyToContainer(_ context.Context, id currus.ContainerID, _ cur
 	if _, ok := e.containers[id]; !ok {
 		return fmt.Errorf("currustest: copy to %s: %w", id, currus.ErrNotFound)
 	}
+
 	return nil
 }
 
@@ -394,6 +416,7 @@ func (e *Engine) CopyFromContainer(_ context.Context, id currus.ContainerID, _ c
 	if _, ok := e.containers[id]; !ok {
 		return nil, fmt.Errorf("currustest: copy from %s: %w", id, currus.ErrNotFound)
 	}
+
 	return io.NopCloser(bytes.NewReader(nil)), nil
 }
 
@@ -404,5 +427,6 @@ func (e *Engine) ContainerState(id currus.ContainerID) string {
 	if c, ok := e.containers[id]; ok {
 		return c.state
 	}
+
 	return ""
 }

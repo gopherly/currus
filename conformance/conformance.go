@@ -121,7 +121,7 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 			Name:  name("create"),
 		})
 		if err != nil {
-			assert.True(t,
+			assert.Truef(t,
 				errors.Is(err, currus.ErrAlreadyExists) || errors.Is(err, currus.ErrConflict),
 				"expected ErrAlreadyExists or ErrConflict on duplicate name, got: %v", err)
 		}
@@ -129,8 +129,8 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 		require.NoError(t, eng.RemoveContainer(ctx, id, currus.RemoveContainerOpts{Force: true}))
 
 		err = eng.RemoveContainer(ctx, id, currus.RemoveContainerOpts{})
-		assert.True(t, errors.Is(err, currus.ErrNotFound),
-			"expected ErrNotFound on second remove, got: %v", err)
+		assert.ErrorIsf(t, err, currus.ErrNotFound,
+			"expected ErrNotFound on second remove")
 	})
 
 	t.Run("StartStopContainer", func(t *testing.T) {
@@ -182,7 +182,7 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 				break
 			}
 		}
-		assert.True(t, found, "created container %s not found in ListContainers", id)
+		assert.Truef(t, found, "created container %s not found in ListContainers", id)
 	})
 
 	t.Run("ErrNotFoundOnMissingContainer", func(t *testing.T) {
@@ -192,16 +192,16 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 		bogus := currus.ContainerID("currus-nonexistent-12345")
 
 		err := eng.StartContainer(ctx, bogus)
-		assert.True(t, errors.Is(err, currus.ErrNotFound),
-			"StartContainer on missing id: expected ErrNotFound, got %v", err)
+		assert.ErrorIsf(t, err, currus.ErrNotFound,
+			"StartContainer on missing id: expected ErrNotFound")
 
 		err = eng.StopContainer(ctx, bogus, currus.StopContainerOpts{})
-		assert.True(t, errors.Is(err, currus.ErrNotFound),
-			"StopContainer on missing id: expected ErrNotFound, got %v", err)
+		assert.ErrorIsf(t, err, currus.ErrNotFound,
+			"StopContainer on missing id: expected ErrNotFound")
 
 		err = eng.RemoveContainer(ctx, bogus, currus.RemoveContainerOpts{})
-		assert.True(t, errors.Is(err, currus.ErrNotFound),
-			"RemoveContainer on missing id: expected ErrNotFound, got %v", err)
+		assert.ErrorIsf(t, err, currus.ErrNotFound,
+			"RemoveContainer on missing id: expected ErrNotFound")
 	})
 
 	t.Run("LoggerCapability", func(t *testing.T) {
@@ -271,7 +271,7 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 			AttachStderr: true,
 		})
 		require.NoError(t, err)
-		assert.Equal(t, 0, result.ExitCode, "exec exit code should be 0")
+		assert.Equalf(t, 0, result.ExitCode, "exec exit code should be 0")
 	})
 
 	t.Run("InspectorCapability", func(t *testing.T) {
@@ -297,12 +297,12 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 
 		info, err := ins.Inspect(ctx, id)
 		require.NoError(t, err)
-		assert.Equal(t, id, info.ID, "inspect ID mismatch")
-		assert.NotEmpty(t, info.Image, "inspect image should not be empty")
+		assert.Equalf(t, id, info.ID, "inspect ID mismatch")
+		assert.NotEmptyf(t, info.Image, "inspect image should not be empty")
 
 		_, err = ins.Inspect(ctx, currus.ContainerID("currus-nonexistent-inspect-99"))
-		assert.True(t, errors.Is(err, currus.ErrNotFound),
-			"inspect missing container: expected ErrNotFound, got %v", err)
+		assert.ErrorIsf(t, err, currus.ErrNotFound,
+			"inspect missing container: expected ErrNotFound")
 	})
 
 	t.Run("StaterCapability", func(t *testing.T) {
@@ -368,7 +368,7 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 		require.NoError(t, eng.StartContainer(ctx, id))
 
 		result := <-waitCh
-		assert.Empty(t, result.Error, "wait result should have no error")
+		assert.Emptyf(t, result.Error, "wait result should have no error")
 		t.Logf("wait result: exit_code=%d", result.StatusCode)
 	})
 
@@ -414,7 +414,7 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 				break
 			}
 		}
-		assert.True(t, found, "created network %s not found in ListNetworks", id)
+		assert.Truef(t, found, "created network %s not found in ListNetworks", id)
 
 		require.NoError(t, nw.RemoveNetwork(ctx, id, currus.RemoveNetworkOpts{}))
 	})
@@ -444,7 +444,7 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 				break
 			}
 		}
-		assert.True(t, found, "created volume %s not found in ListVolumes", id)
+		assert.Truef(t, found, "created volume %s not found in ListVolumes", id)
 
 		require.NoError(t, vol.RemoveVolume(ctx, id, currus.RemoveVolumeOpts{Force: true}))
 	})
