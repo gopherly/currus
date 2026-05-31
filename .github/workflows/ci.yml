@@ -226,7 +226,7 @@ jobs:
     name: Coverage Report
     runs-on: ubuntu-latest
     needs: [unit-test, integration-docker, integration-podman, integration-containerd, integration-docker-rootless, integration-podman-rootless]
-    if: always() && (needs.unit-test.result == 'success' || needs.integration-docker.result == 'success')
+    if: always() && (needs.unit-test.result == 'success' || needs.integration-docker.result == 'success' || needs.integration-containerd.result == 'success')
     permissions:
       contents: read
       id-token: write
@@ -244,6 +244,14 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: coverage-integration-docker
+          path: coverage-integration-docker
+
+      - name: Download containerd integration coverage
+        if: needs.integration-containerd.result == 'success'
+        uses: actions/download-artifact@v8
+        with:
+          name: coverage-integration-containerd
+          path: coverage-integration-containerd
 
       - name: Upload unit coverage to Codecov
         if: needs.unit-test.result == 'success'
@@ -262,7 +270,18 @@ jobs:
         with:
           use_oidc: true
           fail_ci_if_error: true
-          files: ./coverage-integration.out
+          files: ./coverage-integration-docker/coverage-integration.out
           flags: integration
           name: currus-integration-docker
+          disable_search: true
+
+      - name: Upload containerd integration coverage to Codecov
+        if: needs.integration-containerd.result == 'success'
+        uses: codecov/codecov-action@v6
+        with:
+          use_oidc: true
+          fail_ci_if_error: true
+          files: ./coverage-integration-containerd/coverage-integration.out
+          flags: integration
+          name: currus-integration-containerd
           disable_search: true

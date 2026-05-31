@@ -191,3 +191,26 @@ func TestMustNewPanic(t *testing.T) {
 		MustNew(t.Context(), WithEngine("bogus"))
 	})
 }
+
+// TestNewViaEnvEngine verifies the CONTAINER_ENGINE env-var path. The moby
+// client is lazy, so no real daemon is required.
+func TestNewViaEnvEngine(t *testing.T) {
+	t.Setenv("CONTAINER_ENGINE", "docker")
+	eng, err := New(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, eng.Close()) })
+	assert.Equal(t, Docker, eng.Engine())
+}
+
+// TestNewAutoDetect is environment-adaptive: if a daemon is reachable
+// autoDetect returns an engine; otherwise it returns ErrNoEngine.
+func TestNewAutoDetect(t *testing.T) {
+	t.Setenv("CONTAINER_ENGINE", "")
+	eng, err := New(t.Context())
+	if err != nil {
+		assert.ErrorIs(t, err, ErrNoEngine)
+		return
+	}
+	t.Cleanup(func() { assert.NoError(t, eng.Close()) })
+	assert.NotNil(t, eng)
+}
