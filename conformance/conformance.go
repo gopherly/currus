@@ -57,8 +57,10 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -75,6 +77,17 @@ const testImage = "docker.io/library/busybox:latest"
 //nolint:gocognit,cyclop // deliberate flat table of independent capability subtests; splitting would scatter the suite
 func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 	t.Helper()
+
+	// name builds a resource name that is unique to this Run invocation. A
+	// run-scoped suffix keeps parallel subtests from colliding and, crucially,
+	// prevents leftover resources from an interrupted earlier run (whose
+	// t.Cleanup never executed) from blocking the next run with a name
+	// conflict. The suffix is fixed within a single Run, so subtests that
+	// deliberately reuse a name to assert a conflict still work.
+	runID := strconv.FormatInt(time.Now().UnixNano(), 36)
+	name := func(suffix string) string {
+		return "currus-conformance-" + runID + "-" + suffix
+	}
 
 	t.Run("Ping", func(t *testing.T) {
 		t.Parallel()
@@ -98,14 +111,14 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 
 		id, err := eng.CreateContainer(ctx, currus.ContainerSpec{
 			Image: testImage,
-			Name:  "currus-conformance-create",
+			Name:  name("create"),
 		})
 		require.NoError(t, err)
 		require.NotEmpty(t, string(id))
 
 		_, err = eng.CreateContainer(ctx, currus.ContainerSpec{
 			Image: testImage,
-			Name:  "currus-conformance-create",
+			Name:  name("create"),
 		})
 		if err != nil {
 			assert.True(t,
@@ -129,7 +142,7 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 
 		id, err := eng.CreateContainer(ctx, currus.ContainerSpec{
 			Image:   testImage,
-			Name:    "currus-conformance-startstop",
+			Name:    name("startstop"),
 			Command: []string{"sleep"},
 			Args:    []string{"30"},
 		})
@@ -151,7 +164,7 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 
 		id, err := eng.CreateContainer(ctx, currus.ContainerSpec{
 			Image: testImage,
-			Name:  "currus-conformance-list",
+			Name:  name("list"),
 		})
 		require.NoError(t, err)
 		t.Cleanup(func() {
@@ -205,7 +218,7 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 
 		id, err := eng.CreateContainer(ctx, currus.ContainerSpec{
 			Image:   testImage,
-			Name:    "currus-conformance-logs",
+			Name:    name("logs"),
 			Command: []string{"echo"},
 			Args:    []string{"hello currus"},
 		})
@@ -241,7 +254,7 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 
 		id, err := eng.CreateContainer(ctx, currus.ContainerSpec{
 			Image:   testImage,
-			Name:    "currus-conformance-exec",
+			Name:    name("exec"),
 			Command: []string{"sleep"},
 			Args:    []string{"30"},
 		})
@@ -275,7 +288,7 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 
 		id, err := eng.CreateContainer(ctx, currus.ContainerSpec{
 			Image: testImage,
-			Name:  "currus-conformance-inspect",
+			Name:  name("inspect"),
 		})
 		require.NoError(t, err)
 		t.Cleanup(func() {
@@ -306,7 +319,7 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 
 		id, err := eng.CreateContainer(ctx, currus.ContainerSpec{
 			Image:   testImage,
-			Name:    "currus-conformance-stats",
+			Name:    name("stats"),
 			Command: []string{"sleep"},
 			Args:    []string{"30"},
 		})
@@ -340,7 +353,7 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 		// Use a container that exits quickly.
 		id, err := eng.CreateContainer(ctx, currus.ContainerSpec{
 			Image:   testImage,
-			Name:    "currus-conformance-wait",
+			Name:    name("wait"),
 			Command: []string{"echo"},
 			Args:    []string{"done"},
 		})
@@ -387,7 +400,7 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 
 		ctx := t.Context()
 
-		id, err := nw.CreateNetwork(ctx, "currus-conformance-net", currus.CreateNetworkOpts{Driver: "bridge"})
+		id, err := nw.CreateNetwork(ctx, name("net"), currus.CreateNetworkOpts{Driver: "bridge"})
 		require.NoError(t, err)
 		require.NotEmpty(t, string(id))
 
@@ -417,7 +430,7 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 
 		ctx := t.Context()
 
-		id, err := vol.CreateVolume(ctx, "currus-conformance-vol", currus.CreateVolumeOpts{})
+		id, err := vol.CreateVolume(ctx, name("vol"), currus.CreateVolumeOpts{})
 		require.NoError(t, err)
 		require.NotEmpty(t, string(id))
 
