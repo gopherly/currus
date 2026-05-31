@@ -239,7 +239,8 @@ func (e *dockerEngine) CreateContainer(ctx context.Context, spec ContainerSpec) 
 		return "", mapDockerErr(fmt.Errorf("docker: create container: %w", err))
 	}
 
-	for _, n := range spec.Networks[1:] {
+	for i := 1; i < len(spec.Networks); i++ {
+		n := spec.Networks[i]
 		if _, nerr := e.cli.NetworkConnect(ctx, n.Name, client.NetworkConnectOptions{
 			Container:      result.ID,
 			EndpointConfig: &network.EndpointSettings{Aliases: n.Aliases},
