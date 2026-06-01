@@ -30,7 +30,7 @@ func TestFakeEngine(t *testing.T) {
 	t.Parallel()
 	eng := currustest.New()
 
-	assert.Equal(t, currus.EngineKind("fake"), eng.Engine())
+	assert.Equal(t, currus.EngineKind("fake"), eng.Kind())
 	assert.Equal(t, currus.Caps{}, eng.Capabilities())
 	assert.NoError(t, eng.Close())
 }
@@ -173,7 +173,7 @@ func TestFakeNotFoundErrors(t *testing.T) {
 		eng := currustest.New()
 		_, err := eng.CreateContainer(ctx, currus.ContainerSpec{})
 		require.Error(t, err)
-		assert.ErrorIs(t, err, currus.ErrNotFound)
+		assert.ErrorIs(t, err, currus.ErrInvalidSpec)
 	})
 
 	t.Run("StartContainer not found", func(t *testing.T) {

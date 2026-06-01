@@ -88,7 +88,9 @@ var (
 
 // newContainerdEngine creates a containerdEngine using the given containerdConfig.
 func newContainerdEngine(cfg containerdConfig) (*containerdEngine, error) {
-	socket := cfg.Socket
+	// Accept both a raw filesystem path and a unix:// URI; containerd.New and
+	// the dialer both expect the raw path.
+	socket := strings.TrimPrefix(cfg.Socket, "unix://")
 	if socket == "" {
 		socket = defaultContainerdSocket
 	}
@@ -122,8 +124,8 @@ func (e *containerdEngine) ctrdCtx(ctx context.Context) context.Context {
 	return namespaces.WithNamespace(ctx, e.namespace)
 }
 
-// Engine returns the backend kind.
-func (e *containerdEngine) Engine() EngineKind {
+// Kind returns the backend kind.
+func (e *containerdEngine) Kind() EngineKind {
 	return Containerd
 }
 
@@ -153,9 +155,13 @@ func (e *containerdEngine) Close() error {
 
 // PullImage fetches the image from a registry and unpacks it into the snapshot
 // store. WithPullUnpack prepares snapshots for immediate container creation.
-func (e *containerdEngine) PullImage(ctx context.Context, ref string, _ PullImageOpts) error {
+func (e *containerdEngine) PullImage(ctx context.Context, ref string, o PullImageOpts) error {
 	e.logger.DebugContext(ctx, "pull image", "ref", ref)
-	_, err := e.cli.Pull(e.ctrdCtx(ctx), ref, containerd.WithPullUnpack)
+	pullOpts := []containerd.RemoteOpt{containerd.WithPullUnpack}
+	if o.Platform != "" {
+		pullOpts = append(pullOpts, containerd.WithPlatform(o.Platform))
+	}
+	_, err := e.cli.Pull(e.ctrdCtx(ctx), ref, pullOpts...)
 	if err != nil {
 		return mapCtrdErr(fmt.Errorf("containerd: pull %s: %w", ref, err))
 	}
@@ -167,6 +173,11 @@ func (e *containerdEngine) PullImage(ctx context.Context, ref string, _ PullImag
 // root filesystem. It does NOT start the container process (use StartContainer).
 func (e *containerdEngine) CreateContainer(ctx context.Context, spec ContainerSpec) (ContainerID, error) {
 	e.logger.DebugContext(ctx, "create container", "image", spec.Image, "name", spec.Name)
+
+	if err := spec.Validate(); err != nil {
+		return "", err
+	}
+
 	nctx := e.ctrdCtx(ctx)
 
 	img, err := e.cli.GetImage(nctx, spec.Image)
@@ -267,13 +278,20 @@ func (e *containerdEngine) StopContainer(ctx context.Context, id ContainerID, o 
 	select {
 	case <-exitCh:
 		_, _ = task.Delete(nctx) //nolint:errcheck // best-effort cleanup
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("containerd: stop %s: %w", id, ctx.Err())
 	case <-time.After(timeout):
 		_ = task.Kill(nctx, syscall.SIGKILL) //nolint:errcheck // best-effort
-		<-exitCh
+		select {
+		case <-exitCh:
+		case <-ctx.Done():
+			return fmt.Errorf("containerd: stop %s (after SIGKILL): %w", id, ctx.Err())
+		}
 		_, _ = task.Delete(nctx) //nolint:errcheck // best-effort cleanup
-	}
 
-	return nil
+		return nil
+	}
 }
 
 // RemoveContainer deletes the container and its snapshot.

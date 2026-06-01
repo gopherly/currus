@@ -62,20 +62,25 @@ func TestDockerConvertMounts(t *testing.T) {
 	})
 }
 
-// TestDockerConvertPorts also verifies that an invalid port spec is silently
-// skipped rather than surfaced as an error.
+// TestDockerConvertPorts verifies that invalid port specs are surfaced as an
+// error and that valid ports are converted correctly.
 func TestDockerConvertPorts(t *testing.T) {
 	t.Parallel()
 
-	t.Run("empty returns nil", func(t *testing.T) {
+	t.Run("empty returns nil without error", func(t *testing.T) {
 		t.Parallel()
-		assert.Nil(t, dockerConvertPorts(nil))
-		assert.Nil(t, dockerConvertPorts([]Port{}))
+		pm, err := dockerConvertPorts(nil)
+		require.NoError(t, err)
+		assert.Nil(t, pm)
+		pm, err = dockerConvertPorts([]Port{})
+		require.NoError(t, err)
+		assert.Nil(t, pm)
 	})
 
 	t.Run("default protocol is tcp", func(t *testing.T) {
 		t.Parallel()
-		pm := dockerConvertPorts([]Port{{Container: 80}})
+		pm, err := dockerConvertPorts([]Port{{Container: 80}})
+		require.NoError(t, err)
 		require.NotEmpty(t, pm)
 		key, err := network.ParsePort("80/tcp")
 		require.NoError(t, err)
@@ -85,7 +90,8 @@ func TestDockerConvertPorts(t *testing.T) {
 
 	t.Run("explicit udp protocol is preserved", func(t *testing.T) {
 		t.Parallel()
-		pm := dockerConvertPorts([]Port{{Container: 53, Protocol: "udp"}})
+		pm, err := dockerConvertPorts([]Port{{Container: 53, Protocol: "udp"}})
+		require.NoError(t, err)
 		require.NotEmpty(t, pm)
 		key, err := network.ParsePort("53/udp")
 		require.NoError(t, err)
@@ -95,7 +101,8 @@ func TestDockerConvertPorts(t *testing.T) {
 
 	t.Run("host port zero leaves HostPort empty", func(t *testing.T) {
 		t.Parallel()
-		pm := dockerConvertPorts([]Port{{Container: 8080}})
+		pm, err := dockerConvertPorts([]Port{{Container: 8080}})
+		require.NoError(t, err)
 		key, err := network.ParsePort("8080/tcp")
 		require.NoError(t, err)
 		bindings := pm[key]
@@ -105,7 +112,8 @@ func TestDockerConvertPorts(t *testing.T) {
 
 	t.Run("host port non-zero is set", func(t *testing.T) {
 		t.Parallel()
-		pm := dockerConvertPorts([]Port{{Container: 8080, Host: 9090}})
+		pm, err := dockerConvertPorts([]Port{{Container: 8080, Host: 9090}})
+		require.NoError(t, err)
 		key, err := network.ParsePort("8080/tcp")
 		require.NoError(t, err)
 		bindings := pm[key]

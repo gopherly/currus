@@ -89,6 +89,14 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 		return "currus-conformance-" + runID + "-" + suffix
 	}
 
+	t.Run("CreateContainerInvalidSpec", func(t *testing.T) {
+		t.Parallel()
+		eng := newEngine(t)
+		_, err := eng.CreateContainer(t.Context(), currus.ContainerSpec{})
+		assert.ErrorIsf(t, err, currus.ErrInvalidSpec,
+			"expected ErrInvalidSpec when Image is empty")
+	})
+
 	t.Run("Ping", func(t *testing.T) {
 		t.Parallel()
 		eng := newEngine(t)
@@ -362,7 +370,7 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 			_ = eng.RemoveContainer(ctx, id, currus.RemoveContainerOpts{Force: true}) //nolint:errcheck // best-effort cleanup
 		})
 
-		waitCh, err := wt.WaitContainer(ctx, id, currus.WaitContainerOpts{Condition: "next-exit"})
+		waitCh, err := wt.WaitContainer(ctx, id, currus.WaitContainerOpts{Condition: currus.WaitConditionNextExit})
 		require.NoError(t, err)
 
 		require.NoError(t, eng.StartContainer(ctx, id))
@@ -417,6 +425,10 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 		assert.Truef(t, found, "created network %s not found in ListNetworks", id)
 
 		require.NoError(t, nw.RemoveNetwork(ctx, id, currus.RemoveNetworkOpts{}))
+
+		err = nw.RemoveNetwork(ctx, id, currus.RemoveNetworkOpts{})
+		assert.ErrorIsf(t, err, currus.ErrNotFound,
+			"expected ErrNotFound on second RemoveNetwork")
 	})
 
 	t.Run("VolumerCapability", func(t *testing.T) {
@@ -447,6 +459,10 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 		assert.Truef(t, found, "created volume %s not found in ListVolumes", id)
 
 		require.NoError(t, vol.RemoveVolume(ctx, id, currus.RemoveVolumeOpts{Force: true}))
+
+		err = vol.RemoveVolume(ctx, id, currus.RemoveVolumeOpts{})
+		assert.ErrorIsf(t, err, currus.ErrNotFound,
+			"expected ErrNotFound on second RemoveVolume")
 	})
 
 	t.Run("EventerCapability", func(t *testing.T) {

@@ -14,6 +14,8 @@
 
 package currus
 
+import "fmt"
+
 // ContainerSpec is the desired state of a container.
 //
 // It is built from the common core of OCI runtime spec, Docker container
@@ -46,6 +48,17 @@ type ContainerSpec struct {
 	Restart RestartPolicy
 	// Networks lists the networks to join at creation time, in order.
 	Networks []NetworkAttachment
+}
+
+// Validate reports whether the spec is well-formed, returning a wrapped
+// [ErrInvalidSpec] when a required field is missing. Drivers call it before
+// create; callers may also use it to check a spec ahead of time.
+func (s ContainerSpec) Validate() error {
+	if s.Image == "" {
+		return fmt.Errorf("%w: image is required", ErrInvalidSpec)
+	}
+
+	return nil
 }
 
 // NetworkAttachment describes a single network a container should join.
@@ -100,13 +113,31 @@ type Resources struct {
 	MemoryBytes int64
 }
 
+// RestartMode describes the restart strategy for a container.
+type RestartMode string
+
+const (
+	// RestartNever disables automatic restarts. This is the default.
+	RestartNever RestartMode = ""
+
+	// RestartAlways restarts the container regardless of exit status.
+	RestartAlways RestartMode = "always"
+
+	// RestartOnFailure restarts the container only when it exits with a
+	// non-zero exit code. Use MaxRetries to cap the number of attempts.
+	RestartOnFailure RestartMode = "on-failure"
+
+	// RestartUnlessStopped restarts the container unless it was explicitly
+	// stopped by the user.
+	RestartUnlessStopped RestartMode = "unless-stopped"
+)
+
 // RestartPolicy describes when and how many times the engine should restart
 // a container after it exits.
 type RestartPolicy struct {
-	// Mode is the restart mode. Accepted values depend on the engine (e.g.
-	// "always", "on-failure", "unless-stopped"). Empty means no restart.
-	Mode string
+	// Mode is the restart strategy. Empty (RestartNever) means no restart.
+	Mode RestartMode
 	// MaxRetries is the maximum number of restart attempts. Only meaningful
-	// with the "on-failure" mode; ignored otherwise.
+	// with RestartOnFailure; ignored otherwise.
 	MaxRetries int
 }

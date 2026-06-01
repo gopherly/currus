@@ -43,6 +43,10 @@ type Caps struct {
 //	    defer rc.Close()
 //	    io.Copy(os.Stdout, rc)
 //	}
+//
+// The returned [io.ReadCloser] always produces plain, demultiplexed output.
+// Implementations are responsible for stripping any transport framing
+// (e.g. the Docker 8-byte stream headers) before returning the reader.
 type Logger interface {
 	ContainerLogs(ctx context.Context, id ContainerID, o ContainerLogsOpts) (io.ReadCloser, error)
 }
@@ -264,11 +268,25 @@ type Waiter interface {
 	WaitContainer(ctx context.Context, id ContainerID, o WaitContainerOpts) (<-chan WaitResult, error)
 }
 
+// WaitCondition describes the event to wait for in a WaitContainer call.
+type WaitCondition string
+
+const (
+	// WaitConditionNotRunning waits until the container is no longer running.
+	// This is the default when Condition is empty.
+	WaitConditionNotRunning WaitCondition = "not-running"
+
+	// WaitConditionNextExit waits for the container's next exit event.
+	WaitConditionNextExit WaitCondition = "next-exit"
+
+	// WaitConditionRemoved waits until the container has been removed.
+	WaitConditionRemoved WaitCondition = "removed"
+)
+
 // WaitContainerOpts controls WaitContainer.
 type WaitContainerOpts struct {
-	// Condition is the event to wait for: "not-running", "removed", or
-	// "next-exit". Empty defaults to "not-running".
-	Condition string
+	// Condition is the event to wait for. Empty defaults to WaitConditionNotRunning.
+	Condition WaitCondition
 }
 
 // WaitResult is the outcome of a WaitContainer call.

@@ -40,4 +40,8 @@ var (
 
 	// ErrNoEngine is returned by New when no reachable engine is found.
 	ErrNoEngine = errors.New("no reachable container engine found")
+
+	// ErrInvalidSpec is returned when a ContainerSpec or option field is
+	// malformed or missing a required value (e.g. an empty Image field).
+	ErrInvalidSpec = errors.New("invalid container spec")
 )

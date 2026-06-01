@@ -13,7 +13,7 @@
 // limitations under the License.
 
 // Package currustest provides an in-memory fake [currus.Engine] for use in
-// tests. It implements currus.Engine plus all capability interfaces
+// tests. [Fake] implements currus.Engine plus all capability interfaces
 // ([currus.Logger], [currus.Execer], [currus.Inspector], [currus.Stater],
 // [currus.Waiter], [currus.Eventer]) so that callers can test code paths that
 // branch on optional features without running a real container daemon.
@@ -41,8 +41,8 @@ import (
 	"gopherly.dev/currus"
 )
 
-// Engine is the in-memory fake engine. It is safe for concurrent use.
-type Engine struct {
+// Fake is the in-memory fake engine. It is safe for concurrent use.
+type Fake struct {
 	mu         sync.RWMutex
 	containers map[currus.ContainerID]*fakeContainer
 	images     map[string]bool
@@ -61,23 +61,23 @@ type fakeContainer struct {
 
 // Compile-time assertions.
 var (
-	_ currus.Engine           = (*Engine)(nil)
-	_ currus.Logger           = (*Engine)(nil)
-	_ currus.Execer           = (*Engine)(nil)
-	_ currus.Inspector        = (*Engine)(nil)
-	_ currus.Stater           = (*Engine)(nil)
-	_ currus.Waiter           = (*Engine)(nil)
-	_ currus.Eventer          = (*Engine)(nil)
-	_ currus.Imager           = (*Engine)(nil)
-	_ currus.Networker        = (*Engine)(nil)
-	_ currus.Volumer          = (*Engine)(nil)
-	_ currus.Copier           = (*Engine)(nil)
-	_ currus.EndpointReporter = (*Engine)(nil)
+	_ currus.Engine           = (*Fake)(nil)
+	_ currus.Logger           = (*Fake)(nil)
+	_ currus.Execer           = (*Fake)(nil)
+	_ currus.Inspector        = (*Fake)(nil)
+	_ currus.Stater           = (*Fake)(nil)
+	_ currus.Waiter           = (*Fake)(nil)
+	_ currus.Eventer          = (*Fake)(nil)
+	_ currus.Imager           = (*Fake)(nil)
+	_ currus.Networker        = (*Fake)(nil)
+	_ currus.Volumer          = (*Fake)(nil)
+	_ currus.Copier           = (*Fake)(nil)
+	_ currus.EndpointReporter = (*Fake)(nil)
 )
 
-// New returns a ready-to-use in-memory fake Engine.
-func New() *Engine {
-	return &Engine{
+// New returns a ready-to-use in-memory fake engine.
+func New() *Fake {
+	return &Fake{
 		containers: make(map[currus.ContainerID]*fakeContainer),
 		images:     make(map[string]bool),
 		networks:   make(map[currus.NetworkID]currus.Network),
@@ -86,28 +86,28 @@ func New() *Engine {
 	}
 }
 
-// Engine returns the fake's engine kind.
-func (e *Engine) Engine() currus.EngineKind {
+// Kind returns the fake's engine kind.
+func (e *Fake) Kind() currus.EngineKind {
 	return currus.EngineKind("fake")
 }
 
 // Capabilities returns zero-value Caps (fake supports nothing non-trivial).
-func (e *Engine) Capabilities() currus.Caps {
+func (e *Fake) Capabilities() currus.Caps {
 	return currus.Caps{}
 }
 
 // Ping always succeeds.
-func (e *Engine) Ping(_ context.Context) error {
+func (e *Fake) Ping(_ context.Context) error {
 	return nil
 }
 
 // Close is a no-op.
-func (e *Engine) Close() error {
+func (e *Fake) Close() error {
 	return nil
 }
 
 // PullImage marks the image as available in the fake's store.
-func (e *Engine) PullImage(_ context.Context, ref string, _ currus.PullImageOpts) error {
+func (e *Fake) PullImage(_ context.Context, ref string, _ currus.PullImageOpts) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.images[ref] = true
@@ -118,9 +118,9 @@ func (e *Engine) PullImage(_ context.Context, ref string, _ currus.PullImageOpts
 // CreateContainer creates an in-memory container. It does NOT require the
 // image to have been pulled first; the fake is permissive to ease test setup.
 // Any networks listed in spec.Networks are recorded as memberships immediately.
-func (e *Engine) CreateContainer(_ context.Context, spec currus.ContainerSpec) (currus.ContainerID, error) {
-	if spec.Image == "" {
-		return "", fmt.Errorf("currustest: create container: %w: image is required", currus.ErrNotFound)
+func (e *Fake) CreateContainer(_ context.Context, spec currus.ContainerSpec) (currus.ContainerID, error) {
+	if err := spec.Validate(); err != nil {
+		return "", fmt.Errorf("currustest: create container: %w", err)
 	}
 	id := currus.ContainerID(fmt.Sprintf("fake-%d", e.counter.Add(1)))
 	e.mu.Lock()
@@ -138,7 +138,7 @@ func (e *Engine) CreateContainer(_ context.Context, spec currus.ContainerSpec) (
 }
 
 // StartContainer transitions a container from "created" or "exited" to "running".
-func (e *Engine) StartContainer(_ context.Context, id currus.ContainerID) error {
+func (e *Fake) StartContainer(_ context.Context, id currus.ContainerID) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	c, ok := e.containers[id]
@@ -155,7 +155,7 @@ func (e *Engine) StartContainer(_ context.Context, id currus.ContainerID) error 
 }
 
 // StopContainer transitions a running container to "exited".
-func (e *Engine) StopContainer(_ context.Context, id currus.ContainerID, _ currus.StopContainerOpts) error {
+func (e *Fake) StopContainer(_ context.Context, id currus.ContainerID, _ currus.StopContainerOpts) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	c, ok := e.containers[id]
@@ -171,7 +171,7 @@ func (e *Engine) StopContainer(_ context.Context, id currus.ContainerID, _ curru
 }
 
 // RemoveContainer deletes a container and removes it from any network memberships.
-func (e *Engine) RemoveContainer(_ context.Context, id currus.ContainerID, o currus.RemoveContainerOpts) error {
+func (e *Fake) RemoveContainer(_ context.Context, id currus.ContainerID, o currus.RemoveContainerOpts) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	c, ok := e.containers[id]
@@ -193,7 +193,7 @@ func (e *Engine) RemoveContainer(_ context.Context, id currus.ContainerID, o cur
 }
 
 // ListContainers returns the containers tracked by the fake.
-func (e *Engine) ListContainers(_ context.Context, o currus.ListContainersOpts) ([]currus.Container, error) {
+func (e *Fake) ListContainers(_ context.Context, o currus.ListContainersOpts) ([]currus.Container, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	out := make([]currus.Container, 0, len(e.containers))
@@ -215,7 +215,7 @@ func (e *Engine) ListContainers(_ context.Context, o currus.ListContainersOpts) 
 
 // ContainerLogs implements currus.Logger.
 // Returns the fake log string written when the container was started.
-func (e *Engine) ContainerLogs(_ context.Context, id currus.ContainerID, _ currus.ContainerLogsOpts) (io.ReadCloser, error) {
+func (e *Fake) ContainerLogs(_ context.Context, id currus.ContainerID, _ currus.ContainerLogsOpts) (io.ReadCloser, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	c, ok := e.containers[id]
@@ -228,7 +228,7 @@ func (e *Engine) ContainerLogs(_ context.Context, id currus.ContainerID, _ curru
 
 // Exec implements currus.Execer.
 // Returns a zero-exit result containing the joined cmd as stdout.
-func (e *Engine) Exec(_ context.Context, id currus.ContainerID, o currus.ExecOpts) (currus.ExecResult, error) {
+func (e *Fake) Exec(_ context.Context, id currus.ContainerID, o currus.ExecOpts) (currus.ExecResult, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	if _, ok := e.containers[id]; !ok {
@@ -247,7 +247,7 @@ func (e *Engine) Exec(_ context.Context, id currus.ContainerID, o currus.ExecOpt
 }
 
 // Inspect implements currus.Inspector.
-func (e *Engine) Inspect(_ context.Context, id currus.ContainerID) (currus.ContainerInfo, error) {
+func (e *Fake) Inspect(_ context.Context, id currus.ContainerID) (currus.ContainerInfo, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	c, ok := e.containers[id]
@@ -271,7 +271,7 @@ func (e *Engine) Inspect(_ context.Context, id currus.ContainerID) (currus.Conta
 }
 
 // Stats implements currus.Stater. Returns zeroed stats for the fake.
-func (e *Engine) Stats(_ context.Context, id currus.ContainerID, _ currus.StatsOpts) (currus.ContainerStats, error) {
+func (e *Fake) Stats(_ context.Context, id currus.ContainerID, _ currus.StatsOpts) (currus.ContainerStats, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	if _, ok := e.containers[id]; !ok {
@@ -284,7 +284,7 @@ func (e *Engine) Stats(_ context.Context, id currus.ContainerID, _ currus.StatsO
 // WaitContainer implements currus.Waiter.
 // The fake returns a channel that immediately yields StatusCode 0 for stopped
 // containers, and blocks until Stop is called for running ones.
-func (e *Engine) WaitContainer(_ context.Context, id currus.ContainerID, _ currus.WaitContainerOpts) (<-chan currus.WaitResult, error) {
+func (e *Fake) WaitContainer(_ context.Context, id currus.ContainerID, _ currus.WaitContainerOpts) (<-chan currus.WaitResult, error) {
 	e.mu.RLock()
 	_, ok := e.containers[id]
 	e.mu.RUnlock()
@@ -301,7 +301,7 @@ func (e *Engine) WaitContainer(_ context.Context, id currus.ContainerID, _ curru
 
 // Events implements currus.Eventer.
 // The fake returns a channel that is closed immediately (no background events).
-func (e *Engine) Events(_ context.Context) (<-chan currus.Event, error) {
+func (e *Fake) Events(_ context.Context) (<-chan currus.Event, error) {
 	out := make(chan currus.Event)
 	close(out)
 
@@ -310,7 +310,7 @@ func (e *Engine) Events(_ context.Context) (<-chan currus.Event, error) {
 
 // SetLogs injects log content for a container, for use in tests.
 // If id is unknown the call is a no-op.
-func (e *Engine) SetLogs(id currus.ContainerID, logs string) {
+func (e *Fake) SetLogs(id currus.ContainerID, logs string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if c, ok := e.containers[id]; ok {
@@ -319,7 +319,7 @@ func (e *Engine) SetLogs(id currus.ContainerID, logs string) {
 }
 
 // ListImages implements currus.Imager.
-func (e *Engine) ListImages(_ context.Context, _ currus.ListImagesOpts) ([]currus.Image, error) {
+func (e *Fake) ListImages(_ context.Context, _ currus.ListImagesOpts) ([]currus.Image, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	out := make([]currus.Image, 0, len(e.images))
@@ -331,7 +331,7 @@ func (e *Engine) ListImages(_ context.Context, _ currus.ListImagesOpts) ([]curru
 }
 
 // RemoveImage implements currus.Imager.
-func (e *Engine) RemoveImage(_ context.Context, ref string, _ currus.RemoveImageOpts) error {
+func (e *Fake) RemoveImage(_ context.Context, ref string, _ currus.RemoveImageOpts) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if !e.images[ref] {
@@ -343,7 +343,7 @@ func (e *Engine) RemoveImage(_ context.Context, ref string, _ currus.RemoveImage
 }
 
 // TagImage implements currus.Imager.
-func (e *Engine) TagImage(_ context.Context, src, dst string) error {
+func (e *Fake) TagImage(_ context.Context, src, dst string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if !e.images[src] {
@@ -355,7 +355,7 @@ func (e *Engine) TagImage(_ context.Context, src, dst string) error {
 }
 
 // CreateNetwork implements currus.Networker.
-func (e *Engine) CreateNetwork(_ context.Context, name string, o currus.CreateNetworkOpts) (currus.NetworkID, error) {
+func (e *Fake) CreateNetwork(_ context.Context, name string, o currus.CreateNetworkOpts) (currus.NetworkID, error) {
 	id := currus.NetworkID("fake-net-" + name)
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -365,7 +365,7 @@ func (e *Engine) CreateNetwork(_ context.Context, name string, o currus.CreateNe
 }
 
 // ListNetworks implements currus.Networker.
-func (e *Engine) ListNetworks(_ context.Context, _ currus.ListNetworksOpts) ([]currus.Network, error) {
+func (e *Fake) ListNetworks(_ context.Context, _ currus.ListNetworksOpts) ([]currus.Network, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	out := make([]currus.Network, 0, len(e.networks))
@@ -377,9 +377,12 @@ func (e *Engine) ListNetworks(_ context.Context, _ currus.ListNetworksOpts) ([]c
 }
 
 // RemoveNetwork implements currus.Networker.
-func (e *Engine) RemoveNetwork(_ context.Context, id currus.NetworkID, _ currus.RemoveNetworkOpts) error {
+func (e *Fake) RemoveNetwork(_ context.Context, id currus.NetworkID, _ currus.RemoveNetworkOpts) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if _, ok := e.networks[id]; !ok {
+		return fmt.Errorf("currustest: remove network %s: %w", id, currus.ErrNotFound)
+	}
 	delete(e.networks, id)
 	delete(e.netMembers, id)
 
@@ -387,7 +390,7 @@ func (e *Engine) RemoveNetwork(_ context.Context, id currus.NetworkID, _ currus.
 }
 
 // ConnectContainer implements currus.Networker.
-func (e *Engine) ConnectContainer(_ context.Context, net currus.NetworkID, id currus.ContainerID, _ currus.ConnectOpts) error {
+func (e *Fake) ConnectContainer(_ context.Context, net currus.NetworkID, id currus.ContainerID, _ currus.ConnectOpts) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if _, ok := e.containers[id]; !ok {
@@ -402,7 +405,7 @@ func (e *Engine) ConnectContainer(_ context.Context, net currus.NetworkID, id cu
 }
 
 // DisconnectContainer implements currus.Networker.
-func (e *Engine) DisconnectContainer(_ context.Context, net currus.NetworkID, id currus.ContainerID, _ currus.DisconnectOpts) error {
+func (e *Fake) DisconnectContainer(_ context.Context, net currus.NetworkID, id currus.ContainerID, _ currus.DisconnectOpts) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if _, ok := e.containers[id]; !ok {
@@ -420,13 +423,13 @@ func (e *Engine) DisconnectContainer(_ context.Context, net currus.NetworkID, id
 
 // Endpoint implements currus.EndpointReporter.
 // Returns a synthetic endpoint suitable for tests.
-func (e *Engine) Endpoint() currus.Endpoint {
+func (e *Fake) Endpoint() currus.Endpoint {
 	return currus.Endpoint{Host: "unix:///var/run/fake.sock"}
 }
 
 // NetworkMembers returns the set of container IDs currently attached to net.
 // Intended for use in tests that need to assert network membership.
-func (e *Engine) NetworkMembers(net currus.NetworkID) []currus.ContainerID {
+func (e *Fake) NetworkMembers(net currus.NetworkID) []currus.ContainerID {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	members := e.netMembers[net]
@@ -439,7 +442,7 @@ func (e *Engine) NetworkMembers(net currus.NetworkID) []currus.ContainerID {
 }
 
 // CreateVolume implements currus.Volumer.
-func (e *Engine) CreateVolume(_ context.Context, name string, o currus.CreateVolumeOpts) (currus.VolumeID, error) {
+func (e *Fake) CreateVolume(_ context.Context, name string, o currus.CreateVolumeOpts) (currus.VolumeID, error) {
 	id := currus.VolumeID("fake-vol-" + name)
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -449,7 +452,7 @@ func (e *Engine) CreateVolume(_ context.Context, name string, o currus.CreateVol
 }
 
 // ListVolumes implements currus.Volumer.
-func (e *Engine) ListVolumes(_ context.Context, _ currus.ListVolumesOpts) ([]currus.Volume, error) {
+func (e *Fake) ListVolumes(_ context.Context, _ currus.ListVolumesOpts) ([]currus.Volume, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	out := make([]currus.Volume, 0, len(e.volumes))
@@ -461,16 +464,19 @@ func (e *Engine) ListVolumes(_ context.Context, _ currus.ListVolumesOpts) ([]cur
 }
 
 // RemoveVolume implements currus.Volumer.
-func (e *Engine) RemoveVolume(_ context.Context, id currus.VolumeID, _ currus.RemoveVolumeOpts) error {
+func (e *Fake) RemoveVolume(_ context.Context, id currus.VolumeID, _ currus.RemoveVolumeOpts) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if _, ok := e.volumes[id]; !ok {
+		return fmt.Errorf("currustest: remove volume %s: %w", id, currus.ErrNotFound)
+	}
 	delete(e.volumes, id)
 
 	return nil
 }
 
 // CopyToContainer implements currus.Copier. No-op in the fake.
-func (e *Engine) CopyToContainer(_ context.Context, id currus.ContainerID, _ currus.CopyToContainerOpts) error {
+func (e *Fake) CopyToContainer(_ context.Context, id currus.ContainerID, _ currus.CopyToContainerOpts) error {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	if _, ok := e.containers[id]; !ok {
@@ -481,7 +487,7 @@ func (e *Engine) CopyToContainer(_ context.Context, id currus.ContainerID, _ cur
 }
 
 // CopyFromContainer implements currus.Copier. Returns an empty TAR archive.
-func (e *Engine) CopyFromContainer(_ context.Context, id currus.ContainerID, _ currus.CopyFromContainerOpts) (io.ReadCloser, error) {
+func (e *Fake) CopyFromContainer(_ context.Context, id currus.ContainerID, _ currus.CopyFromContainerOpts) (io.ReadCloser, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	if _, ok := e.containers[id]; !ok {
@@ -492,7 +498,7 @@ func (e *Engine) CopyFromContainer(_ context.Context, id currus.ContainerID, _ c
 }
 
 // ContainerState returns the state of the container, or "" if unknown.
-func (e *Engine) ContainerState(id currus.ContainerID) string {
+func (e *Fake) ContainerState(id currus.ContainerID) string {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	if c, ok := e.containers[id]; ok {

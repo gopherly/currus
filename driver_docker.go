@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/containerd/platforms"
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/events"
@@ -36,6 +37,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	cerrdefs "github.com/containerd/errdefs"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 // Well-known default socket paths used by autodetection.
@@ -151,8 +153,8 @@ func buildDockerCaps(kind dockerDriverKind) Caps {
 	return caps
 }
 
-// Engine returns the backend kind.
-func (e *dockerEngine) Engine() EngineKind {
+// Kind returns the backend kind.
+func (e *dockerEngine) Kind() EngineKind {
 	return e.kind
 }
 
@@ -177,9 +179,17 @@ func (e *dockerEngine) Close() error {
 }
 
 // PullImage pulls an image from a registry and waits for completion.
-func (e *dockerEngine) PullImage(ctx context.Context, ref string, _ PullImageOpts) error {
+func (e *dockerEngine) PullImage(ctx context.Context, ref string, o PullImageOpts) error {
 	e.logger.DebugContext(ctx, "pull image", "ref", ref)
-	resp, err := e.cli.ImagePull(ctx, ref, client.ImagePullOptions{})
+	opts := client.ImagePullOptions{}
+	if o.Platform != "" {
+		p, err := platforms.Parse(o.Platform)
+		if err != nil {
+			return fmt.Errorf("%w: platform %q: %w", ErrInvalidSpec, o.Platform, err)
+		}
+		opts.Platforms = []ocispec.Platform{p}
+	}
+	resp, err := e.cli.ImagePull(ctx, ref, opts)
 	if err != nil {
 		return mapDockerErr(fmt.Errorf("docker: pull %s: %w", ref, err))
 	}
@@ -194,6 +204,10 @@ func (e *dockerEngine) PullImage(ctx context.Context, ref string, _ PullImageOpt
 func (e *dockerEngine) CreateContainer(ctx context.Context, spec ContainerSpec) (ContainerID, error) {
 	e.logger.DebugContext(ctx, "create container", "image", spec.Image, "name", spec.Name)
 
+	if err := spec.Validate(); err != nil {
+		return "", err
+	}
+
 	cfg := &container.Config{
 		Image:      spec.Image,
 		Env:        spec.Env,
@@ -207,9 +221,14 @@ func (e *dockerEngine) CreateContainer(ctx context.Context, spec ContainerSpec) 
 		cfg.Cmd = spec.Args
 	}
 
+	portBindings, err := dockerConvertPorts(spec.Ports)
+	if err != nil {
+		return "", err
+	}
+
 	hc := &container.HostConfig{
 		Mounts:        dockerConvertMounts(spec.Mounts),
-		PortBindings:  dockerConvertPorts(spec.Ports),
+		PortBindings:  portBindings,
 		RestartPolicy: dockerConvertRestartPolicy(spec.Restart),
 		Resources: container.Resources{
 			NanoCPUs: spec.Resources.NanoCPUs,
@@ -323,6 +342,11 @@ func (e *dockerEngine) ListContainers(ctx context.Context, o ListContainersOpts)
 }
 
 // ContainerLogs implements the Logger capability interface.
+//
+// The returned reader always produces clean, demultiplexed output. For
+// containers without a TTY the Docker daemon wraps stdout and stderr in
+// 8-byte frame headers; this method transparently strips those headers so
+// callers can treat the stream as plain text.
 func (e *dockerEngine) ContainerLogs(ctx context.Context, id ContainerID, o ContainerLogsOpts) (io.ReadCloser, error) {
 	e.logger.DebugContext(ctx, "container logs", "id", id, "follow", o.Follow)
 	tail := "all"
@@ -339,7 +363,44 @@ func (e *dockerEngine) ContainerLogs(ctx context.Context, id ContainerID, o Cont
 		return nil, mapDockerErr(fmt.Errorf("docker: logs %s: %w", id, err))
 	}
 
-	return logsResult, nil
+	// When the container has a TTY the daemon streams raw bytes (no headers).
+	// When it does not, stdout and stderr are framed with 8-byte headers that
+	// must be stripped with stdcopy.StdCopy. We inspect once to detect the
+	// TTY flag; on error we fall back to assuming no TTY (safer default).
+	hasTTY := false
+	if insp, ierr := e.cli.ContainerInspect(ctx, string(id), client.ContainerInspectOptions{}); ierr == nil {
+		if insp.Container.Config != nil {
+			hasTTY = insp.Container.Config.Tty
+		}
+	}
+	if hasTTY {
+		return logsResult, nil
+	}
+
+	// Demultiplex stdout+stderr into a single reader via an io.Pipe.
+	pr, pw := io.Pipe()
+	go func() {
+		_, copyErr := stdcopy.StdCopy(pw, pw, logsResult)
+		_ = logsResult.Close() //nolint:errcheck // best-effort: source already drained
+		_ = pw.CloseWithError(copyErr)
+	}()
+
+	return &demuxCloser{r: pr, src: logsResult}, nil
+}
+
+// demuxCloser wraps an [io.Pipe] reader so that Close also stops the
+// background demux goroutine by closing the source stream.
+type demuxCloser struct {
+	r   *io.PipeReader
+	src io.Closer
+}
+
+func (d *demuxCloser) Read(p []byte) (int, error) { return d.r.Read(p) }
+func (d *demuxCloser) Close() error {
+	err := d.src.Close()
+	_ = d.r.Close() //nolint:errcheck // pipe reader close is always nil
+
+	return err
 }
 
 // Exec implements the Execer capability interface.
@@ -493,10 +554,12 @@ func dockerNetOutput(s container.StatsResponse) uint64 {
 func (e *dockerEngine) WaitContainer(ctx context.Context, id ContainerID, o WaitContainerOpts) (<-chan WaitResult, error) {
 	cond := container.WaitConditionNotRunning
 	switch o.Condition {
-	case "next-exit":
+	case WaitConditionNextExit:
 		cond = container.WaitConditionNextExit
-	case "removed":
+	case WaitConditionRemoved:
 		cond = container.WaitConditionRemoved
+	case WaitConditionNotRunning, "":
+		// default: WaitConditionNotRunning is already set above
 	}
 
 	raw := e.cli.ContainerWait(ctx, string(id), client.ContainerWaitOptions{Condition: cond})
@@ -777,9 +840,10 @@ func dockerConvertMounts(mounts []Mount) []mount.Mount {
 }
 
 // dockerConvertPorts converts Port values into a network.PortMap.
-func dockerConvertPorts(ports []Port) network.PortMap {
+// Returns ErrInvalidSpec if any port spec cannot be parsed.
+func dockerConvertPorts(ports []Port) (network.PortMap, error) {
 	if len(ports) == 0 {
-		return nil
+		return nil, nil //nolint:nilnil // intentional: nil map means "no port bindings"
 	}
 	pm := make(network.PortMap)
 	for _, p := range ports {
@@ -789,7 +853,7 @@ func dockerConvertPorts(ports []Port) network.PortMap {
 		}
 		containerPort, err := network.ParsePort(fmt.Sprintf("%d/%s", p.Container, proto))
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("%w: port %d/%s: %w", ErrInvalidSpec, p.Container, proto, err)
 		}
 		binding := network.PortBinding{}
 		if p.Host != 0 {
@@ -798,7 +862,7 @@ func dockerConvertPorts(ports []Port) network.PortMap {
 		pm[containerPort] = append(pm[containerPort], binding)
 	}
 
-	return pm
+	return pm, nil
 }
 
 // dockerConvertRestartPolicy converts a RestartPolicy to the Docker type.

@@ -17,6 +17,8 @@ package currus
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -78,15 +80,19 @@ type ListContainersOpts struct {
 // It carries only what every backend supports: identity, Ping, Close, and
 // the universal container lifecycle (pull / create / start / stop / remove /
 // list). Non-universal features live behind optional capability interfaces
-// ([Logger], [Execer], [Imager], [Networker], [Volumer], [Eventer])
 // discovered by type assertion:
 //
 //	if lg, ok := eng.(currus.Logger); ok { ... }
 //
+// The full set of optional capability interfaces is:
+// [Logger], [Execer], [Inspector], [Stater], [Waiter], [Eventer],
+// [Imager], [Networker], [Volumer], [Copier], [EndpointReporter].
+// See [doc.go] or the README capability matrix for per-engine support.
+//
 // This keeps Engine from growing into a 50-method interface and makes missing
 // features a typed ok==false rather than a runtime error.
 type Engine interface {
-	Engine() EngineKind
+	Kind() EngineKind
 	Capabilities() Caps
 	Ping(ctx context.Context) error
 	Close() error
@@ -106,6 +112,10 @@ type Engine interface {
 //   - tcp://host:2376 — remote Docker over TCP (use TLSConfig for mutual TLS)
 //   - ssh://user@host — remote Podman or Docker over SSH (system SSH agent)
 //   - npipe:////./pipe/docker_engine — Windows named pipe
+//
+// For containerd, Host accepts either a raw socket path
+// (/run/containerd/containerd.sock) or a unix:// URI; both forms work.
+// The tcp://, ssh://, and npipe:// schemes are not supported by containerd.
 type Endpoint struct {
 	// Host is the endpoint URI (see above for supported schemes).
 	Host string
@@ -136,6 +146,13 @@ func tlsConfigFromCurrus(cfg *TLSConfig) (*tls.Config, error) {
 	}
 	tc := &tls.Config{
 		InsecureSkipVerify: cfg.InsecureSkipVerify,
+	}
+	if len(cfg.CACert) > 0 {
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(cfg.CACert) {
+			return nil, fmt.Errorf("currus: %w: no valid PEM certificates in CACert", ErrInvalidSpec)
+		}
+		tc.RootCAs = pool
 	}
 	if len(cfg.Cert) > 0 && len(cfg.Key) > 0 {
 		cert, err := tls.X509KeyPair(cfg.Cert, cfg.Key)

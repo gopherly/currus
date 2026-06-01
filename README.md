@@ -164,8 +164,9 @@ Supported schemes:
 - `ssh://user@host` for a remote Podman or Docker daemon over SSH
 - `npipe:////./pipe/docker_engine` for a Windows named pipe
 
-For containerd, set `Endpoint.Namespace` to pick the namespace. It defaults to
-`default`.
+For containerd, `Endpoint.Host` accepts either a raw socket path
+(`/run/containerd/containerd.sock`) or a `unix://` URI; both forms work. Set
+`Endpoint.Namespace` to pick the namespace (defaults to `default`).
 
 Rootless Docker and rootless Podman are picked up by auto-detection through the
 `XDG_RUNTIME_DIR` socket path, so they usually work with no extra configuration.
@@ -266,7 +267,7 @@ Swap the real engine for an in-memory fake in your tests, so you need no daemon:
 import "gopherly.dev/currus/currustest"
 
 func TestStartsCache(t *testing.T) {
-    eng := currustest.New() // implements Engine and every capability interface
+    eng := currustest.New() // *currustest.Fake: implements Engine and every capability interface
     // ... drive the same code path against the fake ...
 }
 ```

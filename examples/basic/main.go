@@ -52,7 +52,7 @@ func run() error {
 		}
 	}()
 
-	logger.Info("engine detected", "kind", eng.Engine())
+	logger.Info("engine detected", "kind", eng.Kind())
 
 	if er, ok := eng.(currus.EndpointReporter); ok {
 		ep := er.Endpoint()

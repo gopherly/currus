@@ -145,7 +145,7 @@ func TestOpenKindDocker(t *testing.T) {
 	eng, err := openKind(Docker, buildEngineConfig(nil))
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, eng.Close()) })
-	assert.Equal(t, Docker, eng.Engine())
+	assert.Equal(t, Docker, eng.Kind())
 }
 
 // TestOpenKindPodman verifies that openKind returns a Podman-kind engine.
@@ -154,7 +154,7 @@ func TestOpenKindPodman(t *testing.T) {
 	eng, err := openKind(Podman, buildEngineConfig(nil))
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, eng.Close()) })
-	assert.Equal(t, Podman, eng.Engine())
+	assert.Equal(t, Podman, eng.Kind())
 }
 
 // TestOpenKindContainerd verifies that openKind constructs a Containerd-kind
@@ -172,7 +172,7 @@ func TestOpenKindContainerd(t *testing.T) {
 	eng, err := openKind(Containerd, cfg)
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, eng.Close()) })
-	assert.Equal(t, Containerd, eng.Engine())
+	assert.Equal(t, Containerd, eng.Kind())
 }
 
 // TestNewUnsupportedEngine verifies that New with an explicit unknown kind
@@ -199,7 +199,7 @@ func TestNewViaEnvEngine(t *testing.T) {
 	eng, err := New(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, eng.Close()) })
-	assert.Equal(t, Docker, eng.Engine())
+	assert.Equal(t, Docker, eng.Kind())
 }
 
 // TestNewAutoDetect is environment-adaptive: if a daemon is reachable

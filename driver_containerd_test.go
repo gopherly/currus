@@ -88,7 +88,7 @@ func TestMapCtrdErr(t *testing.T) {
 func TestContainerdEngineKind(t *testing.T) {
 	t.Parallel()
 	e := &containerdEngine{namespace: defaultContainerdNamespace, logger: slog.Default()}
-	assert.Equal(t, Containerd, e.Engine())
+	assert.Equal(t, Containerd, e.Kind())
 }
 
 // TestContainerdCapabilities verifies that Capabilities returns the expected
