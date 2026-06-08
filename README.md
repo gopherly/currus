@@ -43,21 +43,15 @@ import "gopherly.dev/currus"
 ```mermaid
 flowchart TD
     caller["Caller code"] --> api["Engine interface plus capability interfaces"]
-    api --> sel["New: auto-detect or WithEngine(kind)"]
-    sel --> dockerDrv["Docker-API driver (moby client)"]
-    sel --> ctrdDrv["containerd driver (containerd v2)"]
+    api --> sel["New: WithEngine option or auto-detect"]
+    sel --> envVars["Env vars: DOCKER_HOST, CONTAINER_HOST,\nDOCKER_CONTEXT, active Docker context,\nCONTAINER_ENGINE"]
+    envVars --> dockerDrv["Docker-API driver (moby client)"]
+    sel --> sockProbe["Socket probe: Docker, Podman, containerd"]
+    sockProbe --> dockerDrv
+    sockProbe --> ctrdDrv["containerd driver (containerd v2)"]
     dockerDrv --> dockerSock["Docker socket"]
     dockerDrv --> podmanSock["Podman socket (Docker-compatible API)"]
     ctrdDrv --> ctrdSock["containerd socket"]
-
-    style caller fill:#dbeafe,stroke:#3b82f6,color:#1e3a5f
-    style api fill:#fef3c7,stroke:#f59e0b,color:#78350f
-    style sel fill:#fef3c7,stroke:#f59e0b,color:#78350f
-    style dockerDrv fill:#d1fae5,stroke:#10b981,color:#064e3b
-    style ctrdDrv fill:#d1fae5,stroke:#10b981,color:#064e3b
-    style dockerSock fill:#ede9fe,stroke:#8b5cf6,color:#3b0764
-    style podmanSock fill:#ede9fe,stroke:#8b5cf6,color:#3b0764
-    style ctrdSock fill:#ede9fe,stroke:#8b5cf6,color:#3b0764
 ```
 
 The Docker-API driver serves both Docker and Podman, because Podman speaks the
@@ -116,17 +110,26 @@ if err := eng.StartContainer(ctx, id); err != nil {
 
 ## Auto-detection
 
-`New` probes endpoints in this order and returns the first one that answers a
-`Ping`:
+`New` resolves the engine in this order and returns the first one that answers
+a `Ping`:
 
-1. `CONTAINER_ENGINE` environment variable (`docker`, `podman`, or `containerd`)
-2. Docker socket (`unix:///var/run/docker.sock`)
-3. Podman rootless socket (`$XDG_RUNTIME_DIR/podman/podman.sock`)
-4. Podman rootful socket (`unix:///run/podman/podman.sock`)
-5. containerd socket (`unix:///run/containerd/containerd.sock`)
+1. `DOCKER_HOST` environment variable (Docker engine; reads `DOCKER_TLS_VERIFY`
+   and `DOCKER_CERT_PATH` for TLS)
+2. `CONTAINER_HOST` environment variable (Podman engine)
+3. `DOCKER_CONTEXT` environment variable (reads Docker context metadata)
+4. Active context from `~/.docker/config.json` (skipped when `"default"` or absent)
+5. `CONTAINER_ENGINE` environment variable (`docker`, `podman`, or `containerd`)
+6. Docker socket (`/var/run/docker.sock`, then `~/.docker/run/docker.sock`)
+7. Podman rootless socket (`$XDG_RUNTIME_DIR/podman/podman.sock` or
+   `~/.local/share/containers/podman/machine/podman.sock`)
+8. Podman rootful socket (`/run/podman/podman.sock`)
+9. containerd socket (`/run/containerd/containerd.sock`)
 
 Each candidate is validated with `Ping` before it is returned. A stale socket
 file that no daemon is listening on does not count as a live engine.
+
+`DOCKER_HOST` and `DOCKER_CONTEXT` are mutually exclusive. Setting both returns
+an error.
 
 ## Explicit engine selection
 

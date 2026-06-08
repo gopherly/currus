@@ -78,6 +78,15 @@ func TestTLSConfigFromCurrus(t *testing.T) {
 			cfg:       &TLSConfig{Key: keyPEM},
 			wantCerts: 0,
 		},
+		{
+			name: "valid CACert sets root pool",
+			cfg:  &TLSConfig{CACert: certPEM},
+		},
+		{
+			name:    "invalid CACert returns ErrInvalidSpec",
+			cfg:     &TLSConfig{CACert: []byte("not-a-cert")},
+			wantErr: true,
+		},
 	}
 
 	for _, tc := range tests {

@@ -168,6 +168,42 @@
             tags = "integration";
             coverProfile = "coverage-integration.out";
           };
+
+          test-podman = mkApp {
+            name = "test-podman";
+            description = "Start an ephemeral rootless Podman socket and run integration tests against it";
+            script = ''
+              set -euo pipefail
+              podman="${pkgs.podman}/bin/podman"
+              go="${pkgs.go}/bin/go"
+
+              sock_dir="$(mktemp -d)"
+              sock="$sock_dir/podman.sock"
+              trap 'kill "$svc_pid" 2>/dev/null; rm -rf "$sock_dir"' EXIT
+
+              "$podman" system service --time=0 "unix://$sock" &
+              svc_pid=$!
+
+              # wait for the socket to appear
+              for i in $(seq 1 30); do
+                [ -S "$sock" ] && break
+                sleep 0.2
+              done
+              if [ ! -S "$sock" ]; then
+                echo "podman socket did not appear at $sock" >&2
+                exit 1
+              fi
+
+              export DOCKER_HOST="unix://$sock"
+              export CURRUS_TEST_ENGINE=podman
+              export GOTOOLCHAIN=local
+
+              mapfile -t testpkgs < <("$go" list -tags=integration ./... | grep -vE '/examples(/|$)' || true)
+              "$go" test -tags=integration -race -shuffle=on -covermode=atomic \
+                -coverpkg=./... -coverprofile=coverage-podman.out \
+                -timeout 10m "''${testpkgs[@]}"
+            '';
+          };
         };
       }
     );

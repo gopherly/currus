@@ -69,6 +69,26 @@
 //	    }),
 //	)
 //
+// # Engine detection order
+//
+// When no [WithEngine] option is given, [New] resolves the engine in this
+// order and returns the first one that responds to [Engine.Ping]:
+//
+//  1. DOCKER_HOST env var (Docker engine; reads DOCKER_TLS_VERIFY and
+//     DOCKER_CERT_PATH for TLS)
+//  2. CONTAINER_HOST env var (Podman engine)
+//  3. DOCKER_CONTEXT env var (reads Docker context metadata)
+//  4. Active context from ~/.docker/config.json (skipped when "default" or absent)
+//  5. CONTAINER_ENGINE env var ("docker", "podman", or "containerd")
+//  6. Docker socket (/var/run/docker.sock, then ~/.docker/run/docker.sock)
+//  7. Podman rootless socket ($XDG_RUNTIME_DIR/podman/podman.sock or
+//     ~/.local/share/containers/podman/machine/podman.sock)
+//  8. Podman rootful socket (/run/podman/podman.sock)
+//  9. containerd socket (/run/containerd/containerd.sock)
+//
+// DOCKER_HOST and DOCKER_CONTEXT are mutually exclusive. Setting both returns
+// an error wrapping [ErrInvalidSpec].
+//
 // # Engine interface
 //
 // [Engine] exposes the small core that every backend supports: identity,

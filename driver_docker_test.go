@@ -15,6 +15,8 @@
 package currus
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/moby/moby/api/types/container"
@@ -22,6 +24,8 @@ import (
 	"github.com/moby/moby/api/types/network"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	cerrdefs "github.com/containerd/errdefs"
 )
 
 // TestBuildDockerCaps verifies that buildDockerCaps sets RootlessCapable
@@ -169,6 +173,121 @@ func TestDockerActorString(t *testing.T) {
 		a := events.Actor{ID: "xyz789"}
 		assert.Equal(t, "xyz789", dockerActorString(a))
 	})
+}
+
+// TestDockerCPUPercent verifies that dockerCPUPercent returns the correct
+// percentage from a StatsResponse, including edge cases.
+func TestDockerCPUPercent(t *testing.T) {
+	t.Parallel()
+
+	t.Run("zero deltas returns zero", func(t *testing.T) {
+		t.Parallel()
+		assert.InDelta(t, 0.0, dockerCPUPercent(container.StatsResponse{}), 1e-9)
+	})
+
+	t.Run("negative cpu delta returns zero", func(t *testing.T) {
+		t.Parallel()
+		s := container.StatsResponse{}
+		// PreCPU > CPU would give a negative delta.
+		s.CPUStats.CPUUsage.TotalUsage = 100
+		s.PreCPUStats.CPUUsage.TotalUsage = 200
+		s.CPUStats.SystemUsage = 2000
+		s.PreCPUStats.SystemUsage = 1000
+		s.CPUStats.OnlineCPUs = 4
+		assert.InDelta(t, 0.0, dockerCPUPercent(s), 1e-9)
+	})
+
+	t.Run("calculates percentage using OnlineCPUs", func(t *testing.T) {
+		t.Parallel()
+		s := container.StatsResponse{}
+		s.CPUStats.CPUUsage.TotalUsage = 200
+		s.PreCPUStats.CPUUsage.TotalUsage = 100
+		s.CPUStats.SystemUsage = 2000
+		s.PreCPUStats.SystemUsage = 1000
+		s.CPUStats.OnlineCPUs = 4
+		// (100/1000) * 4 * 100 = 40%
+		assert.InDelta(t, 40.0, dockerCPUPercent(s), 0.01)
+	})
+
+	t.Run("falls back to PercpuUsage length when OnlineCPUs is zero", func(t *testing.T) {
+		t.Parallel()
+		s := container.StatsResponse{}
+		s.CPUStats.CPUUsage.TotalUsage = 200
+		s.PreCPUStats.CPUUsage.TotalUsage = 100
+		s.CPUStats.SystemUsage = 2000
+		s.PreCPUStats.SystemUsage = 1000
+		s.CPUStats.OnlineCPUs = 0
+		s.CPUStats.CPUUsage.PercpuUsage = []uint64{0, 0} // 2 CPUs
+		// (100/1000) * 2 * 100 = 20%
+		assert.InDelta(t, 20.0, dockerCPUPercent(s), 0.01)
+	})
+}
+
+// errUnmappedDocker is a sentinel used in TestMapDockerErr to represent an
+// error that does not belong to any known Docker/containerd error class.
+var errUnmappedDocker = errors.New("unmapped docker error")
+
+// errPodmanAlreadyInUse mimics the raw error message Podman 5.x returns for
+// duplicate container names (HTTP 500 with "already in use" body rather than
+// the HTTP 409 that Docker and errdefs.IsConflict expect).
+var errPodmanAlreadyInUse = errors.New(
+	`docker: create container: Error response from daemon: ` +
+		`the container name "my-ctr" is already in use`,
+)
+
+// TestMapDockerErr covers all branches of the mapDockerErr translator.
+func TestMapDockerErr(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		in      error
+		wantNil bool
+		wantIs  error
+	}{
+		{
+			name:    "nil passthrough",
+			in:      nil,
+			wantNil: true,
+		},
+		{
+			name:   "not found maps to ErrNotFound",
+			in:     fmt.Errorf("docker: %w", cerrdefs.ErrNotFound),
+			wantIs: ErrNotFound,
+		},
+		{
+			name:   "already exists maps to ErrAlreadyExists",
+			in:     fmt.Errorf("docker: %w", cerrdefs.ErrAlreadyExists),
+			wantIs: ErrAlreadyExists,
+		},
+		{
+			name:   "conflict maps to ErrConflict",
+			in:     fmt.Errorf("docker: %w", cerrdefs.ErrConflict),
+			wantIs: ErrConflict,
+		},
+		{
+			name:   "podman already-in-use string maps to ErrAlreadyExists",
+			in:     errPodmanAlreadyInUse,
+			wantIs: ErrAlreadyExists,
+		},
+		{
+			name:   "unrecognised error passes through unchanged",
+			in:     errUnmappedDocker,
+			wantIs: errUnmappedDocker,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := mapDockerErr(tc.in)
+			if tc.wantNil {
+				assert.NoError(t, got)
+				return
+			}
+			assert.ErrorIs(t, got, tc.wantIs)
+		})
+	}
 }
 
 // TestDockerNetInputOutput verifies that dockerNetInput and dockerNetOutput

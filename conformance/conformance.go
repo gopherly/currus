@@ -68,7 +68,19 @@ import (
 	"gopherly.dev/currus"
 )
 
-const testImage = "docker.io/library/busybox:latest"
+// TestImage is the image pulled and used by every conformance subtest.
+const TestImage = "docker.io/library/busybox:latest"
+
+func isRegistryRateLimit(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+
+	return strings.Contains(msg, "toomanyrequests") ||
+		strings.Contains(msg, "rate limit") ||
+		strings.Contains(msg, "pull rate limit")
+}
 
 // Run runs the full conformance suite against the engine returned by newEngine.
 // newEngine is called once per sub-test. If the engine needs cleanup, register
@@ -106,7 +118,10 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 	t.Run("PullImage", func(t *testing.T) {
 		t.Parallel()
 		eng := newEngine(t)
-		err := eng.PullImage(t.Context(), testImage, currus.PullImageOpts{})
+		err := eng.PullImage(t.Context(), TestImage, currus.PullImageOpts{})
+		if err != nil && isRegistryRateLimit(err) {
+			t.Skipf("skipping: registry rate limit hit (%v); authenticate with Docker Hub to avoid this", err)
+		}
 		require.NoError(t, err)
 	})
 
@@ -115,17 +130,17 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 		eng := newEngine(t)
 		ctx := t.Context()
 
-		_ = eng.PullImage(ctx, testImage, currus.PullImageOpts{}) //nolint:errcheck // best-effort: image may already be present
+		_ = eng.PullImage(ctx, TestImage, currus.PullImageOpts{}) //nolint:errcheck // best-effort: image may already be present
 
 		id, err := eng.CreateContainer(ctx, currus.ContainerSpec{
-			Image: testImage,
+			Image: TestImage,
 			Name:  name("create"),
 		})
 		require.NoError(t, err)
 		require.NotEmpty(t, string(id))
 
 		_, err = eng.CreateContainer(ctx, currus.ContainerSpec{
-			Image: testImage,
+			Image: TestImage,
 			Name:  name("create"),
 		})
 		if err != nil {
@@ -146,10 +161,10 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 		eng := newEngine(t)
 		ctx := t.Context()
 
-		_ = eng.PullImage(ctx, testImage, currus.PullImageOpts{}) //nolint:errcheck // best-effort: image may already be present
+		_ = eng.PullImage(ctx, TestImage, currus.PullImageOpts{}) //nolint:errcheck // best-effort: image may already be present
 
 		id, err := eng.CreateContainer(ctx, currus.ContainerSpec{
-			Image:   testImage,
+			Image:   TestImage,
 			Name:    name("startstop"),
 			Command: []string{"sleep"},
 			Args:    []string{"30"},
@@ -168,10 +183,10 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 		eng := newEngine(t)
 		ctx := t.Context()
 
-		_ = eng.PullImage(ctx, testImage, currus.PullImageOpts{}) //nolint:errcheck // best-effort: image may already be present
+		_ = eng.PullImage(ctx, TestImage, currus.PullImageOpts{}) //nolint:errcheck // best-effort: image may already be present
 
 		id, err := eng.CreateContainer(ctx, currus.ContainerSpec{
-			Image: testImage,
+			Image: TestImage,
 			Name:  name("list"),
 		})
 		require.NoError(t, err)
@@ -222,10 +237,10 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 		}
 
 		ctx := t.Context()
-		_ = eng.PullImage(ctx, testImage, currus.PullImageOpts{}) //nolint:errcheck // best-effort: image may already be present
+		_ = eng.PullImage(ctx, TestImage, currus.PullImageOpts{}) //nolint:errcheck // best-effort: image may already be present
 
 		id, err := eng.CreateContainer(ctx, currus.ContainerSpec{
-			Image:   testImage,
+			Image:   TestImage,
 			Name:    name("logs"),
 			Command: []string{"echo"},
 			Args:    []string{"hello currus"},
@@ -258,10 +273,10 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 		}
 
 		ctx := t.Context()
-		_ = eng.PullImage(ctx, testImage, currus.PullImageOpts{}) //nolint:errcheck // best-effort: image may already be present
+		_ = eng.PullImage(ctx, TestImage, currus.PullImageOpts{}) //nolint:errcheck // best-effort: image may already be present
 
 		id, err := eng.CreateContainer(ctx, currus.ContainerSpec{
-			Image:   testImage,
+			Image:   TestImage,
 			Name:    name("exec"),
 			Command: []string{"sleep"},
 			Args:    []string{"30"},
@@ -292,10 +307,10 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 		}
 
 		ctx := t.Context()
-		_ = eng.PullImage(ctx, testImage, currus.PullImageOpts{}) //nolint:errcheck // best-effort: image may already be present
+		_ = eng.PullImage(ctx, TestImage, currus.PullImageOpts{}) //nolint:errcheck // best-effort: image may already be present
 
 		id, err := eng.CreateContainer(ctx, currus.ContainerSpec{
-			Image: testImage,
+			Image: TestImage,
 			Name:  name("inspect"),
 		})
 		require.NoError(t, err)
@@ -323,10 +338,10 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 		}
 
 		ctx := t.Context()
-		_ = eng.PullImage(ctx, testImage, currus.PullImageOpts{}) //nolint:errcheck // best-effort: image may already be present
+		_ = eng.PullImage(ctx, TestImage, currus.PullImageOpts{}) //nolint:errcheck // best-effort: image may already be present
 
 		id, err := eng.CreateContainer(ctx, currus.ContainerSpec{
-			Image:   testImage,
+			Image:   TestImage,
 			Name:    name("stats"),
 			Command: []string{"sleep"},
 			Args:    []string{"30"},
@@ -356,11 +371,11 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 		}
 
 		ctx := t.Context()
-		_ = eng.PullImage(ctx, testImage, currus.PullImageOpts{}) //nolint:errcheck // best-effort: image may already be present
+		_ = eng.PullImage(ctx, TestImage, currus.PullImageOpts{}) //nolint:errcheck // best-effort: image may already be present
 
 		// Use a container that exits quickly.
 		id, err := eng.CreateContainer(ctx, currus.ContainerSpec{
-			Image:   testImage,
+			Image:   TestImage,
 			Name:    name("wait"),
 			Command: []string{"echo"},
 			Args:    []string{"done"},
@@ -390,7 +405,7 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 		}
 
 		ctx := t.Context()
-		_ = eng.PullImage(ctx, testImage, currus.PullImageOpts{}) //nolint:errcheck // best-effort: image may already be present
+		_ = eng.PullImage(ctx, TestImage, currus.PullImageOpts{}) //nolint:errcheck // best-effort: image may already be present
 
 		images, err := img.ListImages(ctx, currus.ListImagesOpts{All: true})
 		require.NoError(t, err)
@@ -496,7 +511,7 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 		}
 
 		ctx := t.Context()
-		_ = eng.PullImage(ctx, testImage, currus.PullImageOpts{}) //nolint:errcheck // best-effort
+		_ = eng.PullImage(ctx, TestImage, currus.PullImageOpts{}) //nolint:errcheck // best-effort
 
 		netID, err := nw.CreateNetwork(ctx, name("attach-net"), currus.CreateNetworkOpts{Driver: "bridge"})
 		require.NoError(t, err)
@@ -505,7 +520,7 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 		})
 
 		id, err := eng.CreateContainer(ctx, currus.ContainerSpec{
-			Image:    testImage,
+			Image:    TestImage,
 			Name:     name("attach-ctr"),
 			Networks: []currus.NetworkAttachment{{Name: string(netID)}},
 		})
@@ -536,7 +551,7 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 		}
 
 		ctx := t.Context()
-		_ = eng.PullImage(ctx, testImage, currus.PullImageOpts{}) //nolint:errcheck // best-effort
+		_ = eng.PullImage(ctx, TestImage, currus.PullImageOpts{}) //nolint:errcheck // best-effort
 
 		netID, err := nw.CreateNetwork(ctx, name("cd-net"), currus.CreateNetworkOpts{Driver: "bridge"})
 		require.NoError(t, err)
@@ -545,7 +560,7 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 		})
 
 		id, err := eng.CreateContainer(ctx, currus.ContainerSpec{
-			Image: testImage,
+			Image: TestImage,
 			Name:  name("cd-ctr"),
 		})
 		require.NoError(t, err)

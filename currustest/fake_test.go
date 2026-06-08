@@ -16,6 +16,7 @@ package currustest_test
 
 import (
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -273,6 +274,227 @@ func TestFakeConflictErrors(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorIs(t, err, currus.ErrConflict)
 	})
+}
+
+// TestFakePingEndpointEvents verifies the trivial methods that are not
+// exercised by the conformance suite's external-package attribution.
+func TestFakePingEndpointEvents(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	eng := currustest.New()
+
+	t.Run("Ping always succeeds", func(t *testing.T) {
+		t.Parallel()
+		assert.NoError(t, eng.Ping(ctx))
+	})
+
+	t.Run("Endpoint returns synthetic host", func(t *testing.T) {
+		t.Parallel()
+		ep := eng.Endpoint()
+		assert.Equal(t, "unix:///var/run/fake.sock", ep.Host)
+	})
+
+	t.Run("Events returns a closed channel", func(t *testing.T) {
+		t.Parallel()
+		ch, err := eng.Events(ctx)
+		require.NoError(t, err)
+		require.NotNil(t, ch)
+		// Channel should be closed immediately — draining must not block.
+		for range ch {
+		}
+	})
+}
+
+// TestFakeInspect verifies that Inspect returns the full spec fields for a
+// known container and ErrNotFound for an unknown ID.
+func TestFakeInspect(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	eng := currustest.New()
+
+	spec := currus.ContainerSpec{
+		Image:      "alpine:latest",
+		Name:       "my-ctr",
+		Command:    []string{"/bin/sh"},
+		Args:       []string{"-c", "sleep 1"},
+		Env:        []string{"FOO=bar"},
+		WorkingDir: "/app",
+		Labels:     map[string]string{"env": "test"},
+	}
+	id, err := eng.CreateContainer(ctx, spec)
+	require.NoError(t, err)
+
+	t.Run("known container returns correct info", func(t *testing.T) {
+		t.Parallel()
+		info, infoErr := eng.Inspect(ctx, id)
+		require.NoError(t, infoErr)
+		assert.Equal(t, id, info.ID)
+		assert.Equal(t, spec.Name, info.Name)
+		assert.Equal(t, spec.Image, info.Image)
+		assert.Equal(t, spec.Labels, info.Labels)
+		assert.Equal(t, spec.WorkingDir, info.WorkingDir)
+		assert.Equal(t, spec.Env, info.Env)
+		assert.False(t, info.State.Running)
+	})
+
+	t.Run("running container shows Running=true", func(t *testing.T) {
+		t.Parallel()
+		ctx2 := t.Context()
+		eng2 := currustest.New()
+		id2, createErr := eng2.CreateContainer(ctx2, currus.ContainerSpec{Image: "alpine"})
+		require.NoError(t, createErr)
+		require.NoError(t, eng2.StartContainer(ctx2, id2))
+		info, inspErr := eng2.Inspect(ctx2, id2)
+		require.NoError(t, inspErr)
+		assert.True(t, info.State.Running)
+	})
+
+	t.Run("unknown container returns ErrNotFound", func(t *testing.T) {
+		t.Parallel()
+		_, notFoundErr := eng.Inspect(ctx, currus.ContainerID("ghost"))
+		require.Error(t, notFoundErr)
+		assert.ErrorIs(t, notFoundErr, currus.ErrNotFound)
+	})
+}
+
+// TestFakeExec verifies that Exec echoes the cmd as stdout when AttachStdout
+// is true, and returns ErrNotFound for an unknown container.
+func TestFakeExec(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	eng := currustest.New()
+
+	id, err := eng.CreateContainer(ctx, currus.ContainerSpec{Image: "alpine"})
+	require.NoError(t, err)
+	require.NoError(t, eng.StartContainer(ctx, id))
+
+	t.Run("with stdout and stderr attached", func(t *testing.T) {
+		t.Parallel()
+		result, execErr := eng.Exec(ctx, id, currus.ExecOpts{
+			Cmd:          []string{"echo", "hello"},
+			AttachStdout: true,
+			AttachStderr: true,
+		})
+		require.NoError(t, execErr)
+		assert.Equal(t, 0, result.ExitCode)
+		require.NotNil(t, result.Stdout)
+		require.NotNil(t, result.Stderr)
+		buf := new(strings.Builder)
+		_, copyErr := io.Copy(buf, result.Stdout)
+		require.NoError(t, copyErr)
+		assert.Equal(t, "echo hello\n", buf.String())
+	})
+
+	t.Run("without stdout attached returns nil Stdout", func(t *testing.T) {
+		t.Parallel()
+		result, execErr := eng.Exec(ctx, id, currus.ExecOpts{
+			Cmd:          []string{"ls"},
+			AttachStdout: false,
+			AttachStderr: false,
+		})
+		require.NoError(t, execErr)
+		assert.Nil(t, result.Stdout)
+		assert.Nil(t, result.Stderr)
+	})
+
+	t.Run("unknown container returns ErrNotFound", func(t *testing.T) {
+		t.Parallel()
+		_, notFoundErr := eng.Exec(ctx, "ghost", currus.ExecOpts{Cmd: []string{"ls"}})
+		require.Error(t, notFoundErr)
+		assert.ErrorIs(t, notFoundErr, currus.ErrNotFound)
+	})
+}
+
+// TestFakeNetworkerCRUD exercises the full create/list/connect/members/
+// disconnect/remove lifecycle of the Fake's Networker implementation.
+func TestFakeNetworkerCRUD(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	eng := currustest.New()
+
+	// Create network.
+	netID, err := eng.CreateNetwork(ctx, "my-net", currus.CreateNetworkOpts{Driver: "bridge"})
+	require.NoError(t, err)
+	assert.NotEmpty(t, string(netID))
+
+	// ListNetworks should include the new network.
+	nets, err := eng.ListNetworks(ctx, currus.ListNetworksOpts{})
+	require.NoError(t, err)
+	var found bool
+	for _, n := range nets {
+		if n.ID == netID {
+			found = true
+			assert.Equal(t, "my-net", n.Name)
+			assert.Equal(t, "bridge", n.Driver)
+		}
+	}
+	assert.Truef(t, found, "created network not in ListNetworks")
+
+	// Create a container and connect it.
+	ctrID, err := eng.CreateContainer(ctx, currus.ContainerSpec{Image: "alpine"})
+	require.NoError(t, err)
+
+	require.NoError(t, eng.ConnectContainer(ctx, netID, ctrID, currus.ConnectOpts{}))
+
+	members := eng.NetworkMembers(netID)
+	assert.Contains(t, members, ctrID)
+
+	// Disconnect.
+	require.NoError(t, eng.DisconnectContainer(ctx, netID, ctrID, currus.DisconnectOpts{}))
+	members = eng.NetworkMembers(netID)
+	assert.NotContains(t, members, ctrID)
+
+	// ConnectContainer: unknown container returns ErrNotFound.
+	err = eng.ConnectContainer(ctx, netID, "ghost", currus.ConnectOpts{})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, currus.ErrNotFound)
+
+	// DisconnectContainer: unknown container returns ErrNotFound.
+	err = eng.DisconnectContainer(ctx, netID, "ghost", currus.DisconnectOpts{})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, currus.ErrNotFound)
+
+	// Remove the network.
+	require.NoError(t, eng.RemoveNetwork(ctx, netID, currus.RemoveNetworkOpts{}))
+
+	// Second remove returns ErrNotFound.
+	err = eng.RemoveNetwork(ctx, netID, currus.RemoveNetworkOpts{})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, currus.ErrNotFound)
+}
+
+// TestFakeVolumerCRUD exercises the full create/list/remove lifecycle of the
+// Fake's Volumer implementation.
+func TestFakeVolumerCRUD(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	eng := currustest.New()
+
+	// Create volume.
+	volID, err := eng.CreateVolume(ctx, "data", currus.CreateVolumeOpts{Driver: "local"})
+	require.NoError(t, err)
+	assert.NotEmpty(t, string(volID))
+
+	// ListVolumes should include the new volume.
+	vols, err := eng.ListVolumes(ctx, currus.ListVolumesOpts{})
+	require.NoError(t, err)
+	var found bool
+	for _, v := range vols {
+		if v.ID == volID {
+			found = true
+			assert.Equal(t, "local", v.Driver)
+			assert.NotEmpty(t, v.Mountpoint)
+		}
+	}
+	assert.Truef(t, found, "created volume not in ListVolumes")
+
+	// Remove the volume.
+	require.NoError(t, eng.RemoveVolume(ctx, volID, currus.RemoveVolumeOpts{}))
+
+	// Second remove returns ErrNotFound.
+	err = eng.RemoveVolume(ctx, volID, currus.RemoveVolumeOpts{})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, currus.ErrNotFound)
 }
 
 // TestFakeListContainersFilter verifies that ListContainers respects the All

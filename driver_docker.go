@@ -706,9 +706,18 @@ func (e *dockerEngine) RemoveNetwork(ctx context.Context, id NetworkID, _ Remove
 // ConnectContainer implements the Networker capability.
 func (e *dockerEngine) ConnectContainer(ctx context.Context, net NetworkID, id ContainerID, o ConnectOpts) error {
 	e.logger.DebugContext(ctx, "connect container to network", "id", id, "network", net)
+
+	// Only set EndpointConfig when there is something to configure. Passing a
+	// zero-value EndpointSettings struct (with empty string fields) confuses
+	// Podman's API into reporting "invalid network mode".
+	var epConfig *network.EndpointSettings
+	if len(o.Aliases) > 0 {
+		epConfig = &network.EndpointSettings{Aliases: o.Aliases}
+	}
+
 	_, err := e.cli.NetworkConnect(ctx, string(net), client.NetworkConnectOptions{
 		Container:      string(id),
-		EndpointConfig: &network.EndpointSettings{Aliases: o.Aliases},
+		EndpointConfig: epConfig,
 	})
 	if err != nil {
 		return mapDockerErr(fmt.Errorf("docker: connect container %s to network %s: %w", id, net, err))
@@ -805,6 +814,12 @@ func (e *dockerEngine) CopyFromContainer(ctx context.Context, id ContainerID, o 
 }
 
 // mapDockerErr translates moby/containerd error types into the sentinel taxonomy.
+//
+// Podman does not always return properly-classified HTTP status codes for
+// conflict situations (e.g. duplicate container names return HTTP 500 with a
+// descriptive message rather than HTTP 409). The string-based fallbacks below
+// handle those known Podman-specific patterns so callers get the correct
+// sentinel regardless of which engine backend is in use.
 func mapDockerErr(err error) error {
 	if err == nil {
 		return nil
@@ -816,6 +831,11 @@ func mapDockerErr(err error) error {
 		return fmt.Errorf("%w: %w", ErrAlreadyExists, err)
 	case cerrdefs.IsConflict(err):
 		return fmt.Errorf("%w: %w", ErrConflict, err)
+	// Podman returns HTTP 500 with "already in use" for duplicate container
+	// names instead of the HTTP 409 that Docker (and the errdefs classifier)
+	// expects.
+	case strings.Contains(err.Error(), "already in use"):
+		return fmt.Errorf("%w: %w", ErrAlreadyExists, err)
 	default:
 		return err
 	}
