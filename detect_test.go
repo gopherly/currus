@@ -546,12 +546,15 @@ func TestNewDockerHostContextConflict(t *testing.T) {
 func clearDockerEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
-		"DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG",
+		"DOCKER_HOST", "DOCKER_CONTEXT",
 		"DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH",
 		"CONTAINER_HOST", "CONTAINER_ENGINE",
 	} {
 		t.Setenv(k, "")
 	}
+	// Point DOCKER_CONFIG at an empty dir so dockerConfigDir() never reads
+	// the runner's real ~/.docker/config.json (which may have an active context).
+	t.Setenv("DOCKER_CONFIG", t.TempDir())
 }
 
 // writeDockerConfig creates a config.json in a temp directory and returns the
