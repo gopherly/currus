@@ -121,12 +121,15 @@
 // # Resolved endpoint
 //
 // The [EndpointReporter] capability exposes the URI the engine actually
-// connected to. This is useful when deriving the host socket path for a
-// bind-mount into a sidecar container:
+// connected to. Use [Endpoint.DaemonSocket] when bind-mounting the daemon
+// socket into a sidecar container. On VM-based setups (Lima, Colima, Docker
+// Desktop, OrbStack) the daemon socket path inside the VM differs from the
+// forwarded socket on the host; DaemonSocket always holds the correct in-VM
+// path:
 //
-//	sock := "/var/run/docker.sock"
 //	if er, ok := eng.(currus.EndpointReporter); ok {
-//	    sock = strings.TrimPrefix(er.Endpoint().Host, "unix://")
+//	    ep := er.Endpoint()
+//	    sock := ep.DaemonSocket // use for bind mounts; empty for tcp/ssh
 //	}
 //
 // # Capability matrix

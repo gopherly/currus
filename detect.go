@@ -120,11 +120,12 @@ func openKind(kind EngineKind, cfg engineConfig) (Engine, error) {
 		}
 
 		return newDockerEngine(dockerConfig{
-			Host:   host,
-			Kind:   dockerKindDocker,
-			TLS:    tlsCfg,
-			Logger: cfg.logger,
-			Tracer: cfg.tracer,
+			Host:         host,
+			DaemonSocket: resolveDaemonSocket(host, cfg.daemonSocket),
+			Kind:         dockerKindDocker,
+			TLS:          tlsCfg,
+			Logger:       cfg.logger,
+			Tracer:       cfg.tracer,
 		})
 	case Podman:
 		host := ""
@@ -137,11 +138,12 @@ func openKind(kind EngineKind, cfg engineConfig) (Engine, error) {
 		}
 
 		return newDockerEngine(dockerConfig{
-			Host:   host,
-			Kind:   dockerKindPodman,
-			TLS:    tlsCfg,
-			Logger: cfg.logger,
-			Tracer: cfg.tracer,
+			Host:         host,
+			DaemonSocket: resolveDaemonSocket(host, cfg.daemonSocket),
+			Kind:         dockerKindPodman,
+			TLS:          tlsCfg,
+			Logger:       cfg.logger,
+			Tracer:       cfg.tracer,
 		})
 	case Containerd:
 		socket := ""
@@ -152,10 +154,11 @@ func openKind(kind EngineKind, cfg engineConfig) (Engine, error) {
 		}
 
 		return newContainerdEngine(containerdConfig{
-			Socket:    socket,
-			Namespace: ns,
-			Logger:    cfg.logger,
-			Tracer:    cfg.tracer,
+			Socket:       socket,
+			DaemonSocket: resolveDaemonSocket(socket, cfg.daemonSocket),
+			Namespace:    ns,
+			Logger:       cfg.logger,
+			Tracer:       cfg.tracer,
 		})
 	default:
 		return nil, fmt.Errorf("engine kind %q: %w", kind, ErrUnsupported)
@@ -171,15 +174,17 @@ func autoDetect(ctx context.Context, cfg engineConfig) (Engine, error) {
 	}
 
 	dockerCandidate := func(socket string, dkind dockerDriverKind, kind EngineKind) candidate {
+		host := "unix://" + socket
 		return candidate{
 			kind:   kind,
 			socket: socket,
 			open: func() (Engine, error) {
 				return newDockerEngine(dockerConfig{
-					Host:   "unix://" + socket,
-					Kind:   dkind,
-					Logger: cfg.logger,
-					Tracer: cfg.tracer,
+					Host:         host,
+					DaemonSocket: resolveDaemonSocket(host, cfg.daemonSocket),
+					Kind:         dkind,
+					Logger:       cfg.logger,
+					Tracer:       cfg.tracer,
 				})
 			},
 		}
@@ -196,9 +201,10 @@ func autoDetect(ctx context.Context, cfg engineConfig) (Engine, error) {
 			socket: ctrdSocket,
 			open: func() (Engine, error) {
 				return newContainerdEngine(containerdConfig{
-					Socket: ctrdSocket,
-					Logger: cfg.logger,
-					Tracer: cfg.tracer,
+					Socket:       ctrdSocket,
+					DaemonSocket: resolveDaemonSocket(ctrdSocket, cfg.daemonSocket),
+					Logger:       cfg.logger,
+					Tracer:       cfg.tracer,
 				})
 			},
 		},
@@ -306,20 +312,22 @@ func envEndpoint(cfg engineConfig) (Engine, error) {
 		}
 
 		return newDockerEngine(dockerConfig{
-			Host:   dockerHost,
-			Kind:   dockerKindDocker,
-			TLS:    tlsCfg,
-			Logger: cfg.logger,
-			Tracer: cfg.tracer,
+			Host:         dockerHost,
+			DaemonSocket: resolveDaemonSocket(dockerHost, cfg.daemonSocket),
+			Kind:         dockerKindDocker,
+			TLS:          tlsCfg,
+			Logger:       cfg.logger,
+			Tracer:       cfg.tracer,
 		})
 	}
 
 	if containerHost := os.Getenv("CONTAINER_HOST"); containerHost != "" {
 		return newDockerEngine(dockerConfig{
-			Host:   containerHost,
-			Kind:   dockerKindPodman,
-			Logger: cfg.logger,
-			Tracer: cfg.tracer,
+			Host:         containerHost,
+			DaemonSocket: resolveDaemonSocket(containerHost, cfg.daemonSocket),
+			Kind:         dockerKindPodman,
+			Logger:       cfg.logger,
+			Tracer:       cfg.tracer,
 		})
 	}
 
@@ -332,10 +340,11 @@ func envEndpoint(cfg engineConfig) (Engine, error) {
 		}
 
 		return newDockerEngine(dockerConfig{
-			Host:   host,
-			Kind:   dockerKindDocker,
-			Logger: cfg.logger,
-			Tracer: cfg.tracer,
+			Host:         host,
+			DaemonSocket: resolveDaemonSocket(host, cfg.daemonSocket),
+			Kind:         dockerKindDocker,
+			Logger:       cfg.logger,
+			Tracer:       cfg.tracer,
 		})
 	}
 
@@ -346,10 +355,11 @@ func envEndpoint(cfg engineConfig) (Engine, error) {
 		}
 
 		return newDockerEngine(dockerConfig{
-			Host:   host,
-			Kind:   dockerKindDocker,
-			Logger: cfg.logger,
-			Tracer: cfg.tracer,
+			Host:         host,
+			DaemonSocket: resolveDaemonSocket(host, cfg.daemonSocket),
+			Kind:         dockerKindDocker,
+			Logger:       cfg.logger,
+			Tracer:       cfg.tracer,
 		})
 	}
 

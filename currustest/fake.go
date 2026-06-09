@@ -424,7 +424,10 @@ func (e *Fake) DisconnectContainer(_ context.Context, net currus.NetworkID, id c
 // Endpoint implements currus.EndpointReporter.
 // Returns a synthetic endpoint suitable for tests.
 func (e *Fake) Endpoint() currus.Endpoint {
-	return currus.Endpoint{Host: "unix:///var/run/fake.sock"}
+	return currus.Endpoint{
+		Host:         "unix:///var/run/fake.sock",
+		DaemonSocket: "/var/run/fake.sock",
+	}
 }
 
 // NetworkMembers returns the set of container IDs currently attached to net.

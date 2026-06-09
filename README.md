@@ -174,6 +174,42 @@ For containerd, `Endpoint.Host` accepts either a raw socket path
 Rootless Docker and rootless Podman are picked up by auto-detection through the
 `XDG_RUNTIME_DIR` socket path, so they usually work with no extra configuration.
 
+## Bind-mounting the daemon socket
+
+When a container needs to communicate with the Docker daemon (e.g. a CI sidecar
+or a cloud-provider controller), it must bind-mount the daemon socket. Use
+`Endpoint.DaemonSocket` — not `Endpoint.Host` — for this purpose.
+
+On VM-based Docker setups (Lima, Colima, Docker Desktop, OrbStack, Rancher
+Desktop), the forwarded socket the host connects through (e.g.
+`~/.lima/default/sock/docker.sock`) **cannot** be bind-mounted into containers.
+The daemon socket inside the VM is always `/var/run/docker.sock`. currus
+auto-detects this and sets `DaemonSocket` correctly regardless of the platform:
+
+```go
+if er, ok := eng.(currus.EndpointReporter); ok {
+    ep := er.Endpoint()
+    // ep.DaemonSocket is correct on Linux and macOS, native and VM-based.
+    mount := currus.Mount{
+        Type:   currus.MountTypeBind,
+        Source: ep.DaemonSocket,
+        Target: "/var/run/docker.sock",
+    }
+}
+```
+
+`DaemonSocket` is empty for non-unix endpoints (tcp://, ssh://) where
+bind-mounting is not possible. Override the auto-detected value with
+`WithDaemonSocket` or the `CURRUS_DAEMON_SOCKET` environment variable:
+
+```go
+// Programmatic override
+eng, err := currus.New(ctx, currus.WithDaemonSocket("/custom/docker.sock"))
+
+// Environment variable override
+// CURRUS_DAEMON_SOCKET=/custom/docker.sock
+```
+
 ## Container lifecycle
 
 Every `Engine` supports the universal container lifecycle:

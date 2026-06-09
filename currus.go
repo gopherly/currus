@@ -116,9 +116,28 @@ type Engine interface {
 // For containerd, Host accepts either a raw socket path
 // (/run/containerd/containerd.sock) or a unix:// URI; both forms work.
 // The tcp://, ssh://, and npipe:// schemes are not supported by containerd.
+//
+// When returned by [EndpointReporter.Endpoint], DaemonSocket is automatically
+// populated with the socket path as seen from inside the daemon's filesystem.
+// On VM-based Docker setups (Lima, Colima, Docker Desktop, OrbStack) the
+// forwarded host socket cannot be bind-mounted into containers; use
+// DaemonSocket instead of parsing Host for that purpose.
 type Endpoint struct {
 	// Host is the endpoint URI (see above for supported schemes).
 	Host string
+
+	// DaemonSocket is the bind-mountable path to the daemon socket as seen
+	// from inside the daemon's own filesystem. Use this field—not Host—when
+	// constructing a bind mount of the Docker socket into a sidecar container.
+	//
+	// On native Linux this equals the unix socket path stripped of the
+	// "unix://" scheme (e.g. "/var/run/docker.sock"). On VM-based setups
+	// (Lima, Colima, Docker Desktop, OrbStack) the daemon socket inside the VM
+	// is always "/var/run/docker.sock" regardless of the Host forwarding path.
+	//
+	// Empty for non-unix endpoints (tcp://, ssh://, npipe://) where
+	// bind-mounting the daemon socket is not possible.
+	DaemonSocket string
 
 	// Namespace is the containerd namespace to use. Ignored by Docker and
 	// Podman drivers. Empty defaults to "default".
@@ -170,10 +189,11 @@ type Option func(*engineConfig)
 
 // engineConfig is the internal configuration built from Options.
 type engineConfig struct {
-	kind     EngineKind
-	endpoint *Endpoint
-	logger   *slog.Logger
-	tracer   trace.TracerProvider
+	kind         EngineKind
+	endpoint     *Endpoint
+	daemonSocket string
+	logger       *slog.Logger
+	tracer       trace.TracerProvider
 }
 
 // WithEngine selects a specific engine backend instead of auto-detecting.
@@ -189,6 +209,16 @@ func WithEngine(kind EngineKind) Option {
 func WithEndpoint(ep Endpoint) Option {
 	return func(c *engineConfig) {
 		c.endpoint = &ep
+	}
+}
+
+// WithDaemonSocket overrides the bind-mountable daemon socket path stored in
+// [Endpoint.DaemonSocket]. Use this when auto-detection produces the wrong
+// result for an unusual setup. The CURRUS_DAEMON_SOCKET environment variable
+// provides the same override without code changes.
+func WithDaemonSocket(path string) Option {
+	return func(c *engineConfig) {
+		c.daemonSocket = path
 	}
 }
 

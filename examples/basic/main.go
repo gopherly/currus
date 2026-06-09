@@ -27,7 +27,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"strings"
 
 	"gopherly.dev/currus"
 )
@@ -56,8 +55,7 @@ func run() error {
 
 	if er, ok := eng.(currus.EndpointReporter); ok {
 		ep := er.Endpoint()
-		sock := strings.TrimPrefix(ep.Host, "unix://")
-		logger.Info("resolved engine endpoint", "host", ep.Host, "socket", sock)
+		logger.Info("resolved engine endpoint", "host", ep.Host, "daemon_socket", ep.DaemonSocket)
 	}
 
 	const image = "docker.io/library/busybox:latest"

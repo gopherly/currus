@@ -58,6 +58,10 @@ type containerdConfig struct {
 	// Socket is the path to the containerd socket. Empty uses the default.
 	Socket string
 
+	// DaemonSocket is the pre-resolved bind-mountable socket path.
+	// It is populated by resolveDaemonSocket before the driver is constructed.
+	DaemonSocket string
+
 	// Namespace is the containerd namespace to operate in. Empty uses
 	// defaultContainerdNamespace.
 	Namespace string
@@ -73,11 +77,12 @@ type containerdConfig struct {
 // It implements Engine. It does NOT implement Logger because
 // containerd has no native container logs API.
 type containerdEngine struct {
-	cli       *containerd.Client
-	namespace string
-	socket    string // resolved socket path, e.g. "/run/containerd/containerd.sock"
-	logger    *slog.Logger
-	tracer    trace.TracerProvider
+	cli          *containerd.Client
+	namespace    string
+	socket       string // resolved socket path, e.g. "/run/containerd/containerd.sock"
+	daemonSocket string // bind-mountable socket path inside the daemon's filesystem
+	logger       *slog.Logger
+	tracer       trace.TracerProvider
 }
 
 // Compile-time assertions.
@@ -111,11 +116,12 @@ func newContainerdEngine(cfg containerdConfig) (*containerdEngine, error) {
 	}
 
 	return &containerdEngine{
-		cli:       cli,
-		namespace: ns,
-		socket:    socket,
-		logger:    lg,
-		tracer:    cfg.Tracer,
+		cli:          cli,
+		namespace:    ns,
+		socket:       socket,
+		daemonSocket: cfg.DaemonSocket,
+		logger:       lg,
+		tracer:       cfg.Tracer,
 	}, nil
 }
 
@@ -388,8 +394,9 @@ func ctrdContainerState(ctx context.Context, c containerd.Container) string {
 // field is silently ignored.
 func (e *containerdEngine) Endpoint() Endpoint {
 	return Endpoint{
-		Host:      "unix://" + e.socket,
-		Namespace: e.namespace,
+		Host:         "unix://" + e.socket,
+		DaemonSocket: e.daemonSocket,
+		Namespace:    e.namespace,
 	}
 }
 

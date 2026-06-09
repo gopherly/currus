@@ -60,6 +60,10 @@ type dockerConfig struct {
 	// Host is the Docker socket URI (e.g. "unix:///var/run/docker.sock").
 	Host string
 
+	// DaemonSocket is the pre-resolved bind-mountable socket path.
+	// It is populated by resolveDaemonSocket before the driver is constructed.
+	DaemonSocket string
+
 	// Kind distinguishes Docker from Podman for EngineKind reporting.
 	Kind dockerDriverKind
 
@@ -75,12 +79,13 @@ type dockerConfig struct {
 
 // dockerEngine is the Docker-API driver serving both Docker and Podman.
 type dockerEngine struct {
-	cli    *client.Client
-	kind   EngineKind
-	caps   Caps
-	host   string // resolved URI, e.g. "unix:///var/run/docker.sock"
-	logger *slog.Logger
-	tracer trace.TracerProvider
+	cli          *client.Client
+	kind         EngineKind
+	caps         Caps
+	host         string // resolved URI, e.g. "unix:///var/run/docker.sock"
+	daemonSocket string // bind-mountable socket path inside the daemon's filesystem
+	logger       *slog.Logger
+	tracer       trace.TracerProvider
 }
 
 // Compile-time assertions.
@@ -135,12 +140,13 @@ func newDockerEngine(cfg dockerConfig) (*dockerEngine, error) {
 	}
 
 	return &dockerEngine{
-		cli:    cli,
-		kind:   kind,
-		caps:   buildDockerCaps(cfg.Kind),
-		host:   host,
-		logger: lg,
-		tracer: cfg.Tracer,
+		cli:          cli,
+		kind:         kind,
+		caps:         buildDockerCaps(cfg.Kind),
+		host:         host,
+		daemonSocket: cfg.DaemonSocket,
+		logger:       lg,
+		tracer:       cfg.Tracer,
 	}, nil
 }
 
@@ -742,7 +748,7 @@ func (e *dockerEngine) DisconnectContainer(ctx context.Context, net NetworkID, i
 
 // Endpoint implements the EndpointReporter capability.
 func (e *dockerEngine) Endpoint() Endpoint {
-	return Endpoint{Host: e.host}
+	return Endpoint{Host: e.host, DaemonSocket: e.daemonSocket}
 }
 
 // CreateVolume implements the Volumer capability.

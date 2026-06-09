@@ -309,13 +309,19 @@ type Event struct {
 }
 
 // EndpointReporter reports the endpoint the engine actually connected to.
-// Callers can use the resolved Host URI to, for example, derive the host
-// socket path when bind-mounting it into a sidecar container:
 //
-//	sock := "/var/run/docker.sock"
+// Use [Endpoint.DaemonSocket] when bind-mounting the engine socket into a
+// sidecar container. On VM-based setups (Lima, Colima, Docker Desktop,
+// OrbStack) the daemon socket path inside the VM differs from the forwarded
+// socket path on the host; DaemonSocket always reflects the correct in-VM
+// path:
+//
 //	if er, ok := eng.(currus.EndpointReporter); ok {
-//	    sock = strings.TrimPrefix(er.Endpoint().Host, "unix://")
+//	    sock := er.Endpoint().DaemonSocket // use this for bind mounts
 //	}
+//
+// DaemonSocket is empty for non-unix endpoints (tcp://, ssh://) where
+// bind-mounting is not possible.
 //
 // Implemented by Docker, Podman, and containerd drivers.
 type EndpointReporter interface {
