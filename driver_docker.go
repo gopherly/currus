@@ -19,6 +19,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -38,7 +39,6 @@ import (
 	"github.com/moby/moby/client"
 	"go.opentelemetry.io/otel/trace"
 
-	cerrdefs "github.com/containerd/errdefs"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -47,6 +47,9 @@ const (
 	defaultDockerSocket        = "/var/run/docker.sock"
 	defaultPodmanRootfulSocket = "/run/podman/podman.sock"
 )
+
+// defaultEventBufferSize is the capacity of the channel returned by Events.
+const defaultEventBufferSize = 64
 
 // dockerDriverKind identifies whether the client is pointed at a Docker or
 // Podman socket. Used only for reporting the EngineKind back to callers.
@@ -652,7 +655,7 @@ func (e *dockerEngine) WaitContainer(ctx context.Context, id ContainerID, o Wait
 func (e *dockerEngine) Events(ctx context.Context) (<-chan Event, error) {
 	raw := e.cli.Events(ctx, client.EventsListOptions{})
 
-	out := make(chan Event, 64)
+	out := make(chan Event, defaultEventBufferSize)
 	go func() {
 		defer close(out)
 		for {
@@ -879,28 +882,23 @@ func (e *dockerEngine) CopyFromContainer(ctx context.Context, id ContainerID, o 
 //
 // Podman does not always return properly-classified HTTP status codes for
 // conflict situations (e.g. duplicate container names return HTTP 500 with a
-// descriptive message rather than HTTP 409). The string-based fallbacks below
-// handle those known Podman-specific patterns so callers get the correct
+// descriptive message rather than HTTP 409). The string-based fallback below
+// handles that known Podman-specific pattern so callers get the correct
 // sentinel regardless of which engine backend is in use.
 func mapDockerErr(err error) error {
-	if err == nil {
-		return nil
+	if mapped := mapContainerErr(err); errors.Is(mapped, ErrNotFound) ||
+		errors.Is(mapped, ErrAlreadyExists) ||
+		errors.Is(mapped, ErrConflict) {
+		return mapped
 	}
-	switch {
-	case cerrdefs.IsNotFound(err):
-		return fmt.Errorf("%w: %w", ErrNotFound, err)
-	case cerrdefs.IsAlreadyExists(err):
-		return fmt.Errorf("%w: %w", ErrAlreadyExists, err)
-	case cerrdefs.IsConflict(err):
-		return fmt.Errorf("%w: %w", ErrConflict, err)
 	// Podman returns HTTP 500 with "already in use" for duplicate container
 	// names instead of the HTTP 409 that Docker (and the errdefs classifier)
 	// expects.
-	case strings.Contains(err.Error(), "already in use"):
+	if err != nil && strings.Contains(err.Error(), "already in use") {
 		return fmt.Errorf("%w: %w", ErrAlreadyExists, err)
-	default:
-		return err
 	}
+
+	return err
 }
 
 // dockerConvertMounts converts Mount values into moby mount.Mount values.

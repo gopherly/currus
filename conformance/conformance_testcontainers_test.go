@@ -106,7 +106,9 @@ func seedImageIntoDinD(t *testing.T, ctx context.Context, dockerHost string) {
 		if waitErr := pullResp.Wait(ctx); waitErr != nil {
 			t.Fatalf("wait for pull of %s: %v", conformance.TestImage, waitErr)
 		}
-		pullResp.Close()
+		if err := pullResp.Close(); err != nil {
+			t.Logf("close pull response: %v", err)
+		}
 	}
 
 	saveRC, err := hostCli.ImageSave(ctx, []string{conformance.TestImage})
@@ -135,5 +137,7 @@ func seedImageIntoDinD(t *testing.T, ctx context.Context, dockerHost string) {
 	if _, copyErr := io.Copy(io.Discard, loadRC); copyErr != nil {
 		t.Logf("drain load response: %v", copyErr)
 	}
-	loadRC.Close()
+	if err := loadRC.Close(); err != nil {
+		t.Logf("close load response: %v", err)
+	}
 }

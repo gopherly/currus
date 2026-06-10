@@ -110,60 +110,28 @@ func buildEngineConfig(opts []Option) engineConfig {
 // For Docker and Podman engines, it also calls resolveInfo to populate Caps.
 func openKind(ctx context.Context, kind EngineKind, cfg engineConfig) (Engine, error) {
 	switch kind {
-	case Docker:
+	case Docker, Podman:
 		host := ""
 		if cfg.endpoint != nil {
 			host = cfg.endpoint.Host
 		}
 		tlsCfg, err := tlsConfigFromCurrus(endpointTLS(cfg.endpoint))
 		if err != nil {
-			return nil, fmt.Errorf("currus: Docker TLS config: %w", err)
+			return nil, fmt.Errorf("currus: %s TLS config: %w", kind, err)
+		}
+		dkind := dockerKindDocker
+		if kind == Podman {
+			dkind = dockerKindPodman
 		}
 
-		eng, err := newDockerEngine(dockerConfig{
+		return buildAndResolveDockerEngine(ctx, dockerConfig{
 			Host:         host,
 			DaemonSocket: resolveDaemonSocket(host, cfg.daemonSocket),
-			Kind:         dockerKindDocker,
+			Kind:         dkind,
 			TLS:          tlsCfg,
 			Logger:       cfg.logger,
 			Tracer:       cfg.tracer,
 		})
-		if err != nil {
-			return nil, err
-		}
-		if err = eng.resolveInfo(ctx); err != nil {
-			_ = eng.Close() //nolint:errcheck // best-effort close on failed init
-			return nil, err
-		}
-
-		return eng, nil
-	case Podman:
-		host := ""
-		if cfg.endpoint != nil {
-			host = cfg.endpoint.Host
-		}
-		tlsCfg, err := tlsConfigFromCurrus(endpointTLS(cfg.endpoint))
-		if err != nil {
-			return nil, fmt.Errorf("currus: Podman TLS config: %w", err)
-		}
-
-		eng, err := newDockerEngine(dockerConfig{
-			Host:         host,
-			DaemonSocket: resolveDaemonSocket(host, cfg.daemonSocket),
-			Kind:         dockerKindPodman,
-			TLS:          tlsCfg,
-			Logger:       cfg.logger,
-			Tracer:       cfg.tracer,
-		})
-		if err != nil {
-			return nil, err
-		}
-		if err = eng.resolveInfo(ctx); err != nil {
-			_ = eng.Close() //nolint:errcheck // best-effort close on failed init
-			return nil, err
-		}
-
-		return eng, nil
 	case Containerd:
 		socket := ""
 		ns := ""

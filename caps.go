@@ -32,7 +32,9 @@ type Caps struct {
 	// For Docker and Podman this is detected via docker/podman info at
 	// engine initialization time. For containerd it is inferred from the
 	// socket path (rootless containerd uses a socket under XDG_RUNTIME_DIR).
-	Rootless       bool
+	Rootless bool
+	// NamespaceModel names the isolation model used by the engine
+	// (e.g. "containerd"). Empty for Docker and Podman.
 	NamespaceModel string
 }
 

@@ -35,6 +35,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -44,7 +45,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	containerd "github.com/containerd/containerd/v2/client"
-	cerrdefs "github.com/containerd/errdefs"
 )
 
 // defaultContainerdSocket is the well-known containerd socket path.
@@ -53,6 +53,10 @@ const defaultContainerdSocket = "/run/containerd/containerd.sock"
 // defaultContainerdNamespace is the containerd namespace used when none is
 // configured.
 const defaultContainerdNamespace = "default"
+
+// forceKillTimeout is how long RemoveContainer waits for a SIGKILL'd task to
+// exit before proceeding with container deletion.
+const forceKillTimeout = 5 * time.Second
 
 // containerdConfig holds the parameters needed to build a containerdEngine.
 type containerdConfig struct {
@@ -85,6 +89,7 @@ type containerdEngine struct {
 	daemonSocket string // bind-mountable socket path inside the daemon's filesystem
 	logger       *slog.Logger
 	tracer       trace.TracerProvider
+	counter      atomic.Uint64
 }
 
 // Compile-time assertions.
@@ -200,7 +205,7 @@ func (e *containerdEngine) CreateContainer(ctx context.Context, spec ContainerSp
 
 	id := spec.Name
 	if id == "" {
-		id = fmt.Sprintf("currus-%d", time.Now().UnixNano())
+		id = fmt.Sprintf("currus-%d", e.counter.Add(1))
 	}
 	snapshotID := id + "-snapshot"
 
@@ -228,8 +233,8 @@ func (e *containerdEngine) CreateContainer(ctx context.Context, spec ContainerSp
 	if len(spec.Security.DropCapabilities) > 0 {
 		specOpts = append(specOpts, oci.WithDroppedCapabilities(capStrings(spec.Security.DropCapabilities)))
 	}
-	// Groups, SecurityOpts, DNS, Hostname, ExtraHosts, and Init are not
-	// supported by the containerd driver and are silently ignored.
+	// Networks, Groups, SecurityOpts, DNS, Hostname, ExtraHosts, and Init are
+	// not supported by the containerd driver and are silently ignored.
 
 	c, err := e.cli.NewContainer(nctx, id,
 		containerd.WithImage(img),
@@ -281,20 +286,16 @@ func (e *containerdEngine) StopContainer(ctx context.Context, id ContainerID, o 
 
 	task, err := c.Task(nctx, nil)
 	if err != nil {
-		if cerrdefs.IsNotFound(err) {
-			return fmt.Errorf("containerd: stop %s: %w", id, ErrNotFound)
-		}
-
-		return fmt.Errorf("containerd: get task %s: %w", id, err)
+		return mapCtrdErr(fmt.Errorf("containerd: get task %s: %w", id, err))
 	}
 
 	exitCh, err := task.Wait(nctx)
 	if err != nil {
-		return fmt.Errorf("containerd: wait %s: %w", id, err)
+		return mapCtrdErr(fmt.Errorf("containerd: wait %s: %w", id, err))
 	}
 
 	if err = task.Kill(nctx, syscall.SIGTERM); err != nil {
-		return fmt.Errorf("containerd: kill %s: %w", id, err)
+		return mapCtrdErr(fmt.Errorf("containerd: kill %s: %w", id, err))
 	}
 
 	timeout := o.Timeout
@@ -302,13 +303,16 @@ func (e *containerdEngine) StopContainer(ctx context.Context, id ContainerID, o 
 		timeout = 10 * time.Second
 	}
 
+	stopTimer := time.NewTimer(timeout)
+	defer stopTimer.Stop()
+
 	select {
 	case <-exitCh:
 		_, _ = task.Delete(nctx) //nolint:errcheck // best-effort cleanup
 		return nil
 	case <-ctx.Done():
 		return fmt.Errorf("containerd: stop %s: %w", id, ctx.Err())
-	case <-time.After(timeout):
+	case <-stopTimer.C:
 		_ = task.Kill(nctx, syscall.SIGKILL) //nolint:errcheck // best-effort
 		select {
 		case <-exitCh:
@@ -337,10 +341,12 @@ func (e *containerdEngine) RemoveContainer(ctx context.Context, id ContainerID, 
 			_ = task.Kill(nctx, syscall.SIGKILL) //nolint:errcheck // best-effort
 			exitCh, _ := task.Wait(nctx)         //nolint:errcheck // best-effort
 			if exitCh != nil {
+				killTimer := time.NewTimer(forceKillTimeout)
 				select {
 				case <-exitCh:
-				case <-time.After(5 * time.Second):
+				case <-killTimer.C:
 				}
+				killTimer.Stop()
 			}
 			_, _ = task.Delete(nctx) //nolint:errcheck // best-effort cleanup
 		}
@@ -411,8 +417,6 @@ func ctrdContainerState(ctx context.Context, c containerd.Container) string {
 }
 
 // Endpoint implements the EndpointReporter capability.
-// Networks are not supported by the containerd driver; the ContainerSpec.Networks
-// field is silently ignored.
 func (e *containerdEngine) Endpoint() Endpoint {
 	return Endpoint{
 		Host:         "unix://" + e.socket,
@@ -423,17 +427,5 @@ func (e *containerdEngine) Endpoint() Endpoint {
 
 // mapCtrdErr translates containerd error types into the sentinel taxonomy.
 func mapCtrdErr(err error) error {
-	if err == nil {
-		return nil
-	}
-	switch {
-	case cerrdefs.IsNotFound(err):
-		return fmt.Errorf("%w: %w", ErrNotFound, err)
-	case cerrdefs.IsAlreadyExists(err):
-		return fmt.Errorf("%w: %w", ErrAlreadyExists, err)
-	case cerrdefs.IsConflict(err):
-		return fmt.Errorf("%w: %w", ErrConflict, err)
-	default:
-		return err
-	}
+	return mapContainerErr(err)
 }

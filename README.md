@@ -215,12 +215,26 @@ eng, err := currus.New(ctx, currus.WithDaemonSocket("/custom/docker.sock"))
 Every `Engine` supports the universal container lifecycle:
 
 ```go
-eng.PullImage(ctx, ref, currus.PullImageOpts{})
-id, _ := eng.CreateContainer(ctx, currus.ContainerSpec{Image: "nginx:latest"})
-eng.StartContainer(ctx, id)
-eng.StopContainer(ctx, id, currus.StopContainerOpts{Timeout: 10 * time.Second})
-eng.RemoveContainer(ctx, id, currus.RemoveContainerOpts{Force: true})
-containers, _ := eng.ListContainers(ctx, currus.ListContainersOpts{All: true})
+if err := eng.PullImage(ctx, ref, currus.PullImageOpts{}); err != nil {
+    log.Fatal(err)
+}
+id, err := eng.CreateContainer(ctx, currus.ContainerSpec{Image: "nginx:latest"})
+if err != nil {
+    log.Fatal(err)
+}
+if err := eng.StartContainer(ctx, id); err != nil {
+    log.Fatal(err)
+}
+if err := eng.StopContainer(ctx, id, currus.StopContainerOpts{Timeout: 10 * time.Second}); err != nil {
+    log.Fatal(err)
+}
+if err := eng.RemoveContainer(ctx, id, currus.RemoveContainerOpts{Force: true}); err != nil {
+    log.Fatal(err)
+}
+containers, err := eng.ListContainers(ctx, currus.ListContainersOpts{All: true})
+if err != nil {
+    log.Fatal(err)
+}
 ```
 
 ## Capability interfaces
@@ -239,7 +253,11 @@ if lg, ok := eng.(currus.Logger); ok {
 
 // Exec
 if ex, ok := eng.(currus.Execer); ok {
-    ex.Exec(ctx, id, currus.ExecOpts{Cmd: []string{"redis-cli", "ping"}})
+    result, err := ex.Exec(ctx, id, currus.ExecOpts{Cmd: []string{"redis-cli", "ping"}})
+    if err != nil {
+        log.Fatal(err)
+    }
+    _ = result
 }
 ```
 

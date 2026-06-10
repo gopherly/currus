@@ -17,7 +17,6 @@
 package conformance_test
 
 import (
-	"context"
 	"os"
 	"testing"
 
@@ -45,7 +44,7 @@ func TestConformanceIntegration(t *testing.T) {
 
 func newIntegrationEngine(t *testing.T, kind currus.EngineKind) currus.Engine {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	eng, err := currus.New(ctx, currus.WithEngine(kind))
 	if err != nil {

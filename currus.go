@@ -176,7 +176,7 @@ func tlsConfigFromCurrus(cfg *TLSConfig) (*tls.Config, error) {
 	if len(cfg.Cert) > 0 && len(cfg.Key) > 0 {
 		cert, err := tls.X509KeyPair(cfg.Cert, cfg.Key)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: parse client certificate: %w", ErrInvalidSpec, err)
 		}
 		tc.Certificates = []tls.Certificate{cert}
 	}

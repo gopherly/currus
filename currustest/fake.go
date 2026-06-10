@@ -15,8 +15,10 @@
 // Package currustest provides an in-memory fake [currus.Engine] for use in
 // tests. [Fake] implements currus.Engine plus all capability interfaces
 // ([currus.Logger], [currus.Execer], [currus.Inspector], [currus.Stater],
-// [currus.Waiter], [currus.Eventer]) so that callers can test code paths that
-// branch on optional features without running a real container daemon.
+// [currus.Waiter], [currus.Eventer], [currus.Imager], [currus.Networker],
+// [currus.Volumer], [currus.Copier], [currus.EndpointReporter]) so that
+// callers can test code paths that branch on optional features without
+// running a real container daemon.
 //
 // The fake is also the primary target of the conformance suite in
 // [gopherly.dev/currus/conformance]; keeping the fake conformant prevents it
@@ -76,6 +78,9 @@ type Fake struct {
 	netMembers map[currus.NetworkID]map[currus.ContainerID]struct{}
 	volumes    map[currus.VolumeID]currus.Volume
 	counter    atomic.Uint64
+	// waitChs holds a per-container stop-signal channel created by StartContainer
+	// and closed by StopContainer. WaitContainer blocks on it for running containers.
+	waitChs map[currus.ContainerID]chan struct{}
 }
 
 type fakeContainer struct {
@@ -115,6 +120,7 @@ func New(opts ...FakeOption) *Fake {
 		networks:   make(map[currus.NetworkID]currus.Network),
 		netMembers: make(map[currus.NetworkID]map[currus.ContainerID]struct{}),
 		volumes:    make(map[currus.VolumeID]currus.Volume),
+		waitChs:    make(map[currus.ContainerID]chan struct{}),
 	}
 	for _, o := range opts {
 		o(f)
@@ -187,11 +193,13 @@ func (e *Fake) StartContainer(_ context.Context, id currus.ContainerID) error {
 	}
 	c.state = "running"
 	c.logs = fmt.Sprintf("[%s] container started\n", id)
+	e.waitChs[id] = make(chan struct{})
 
 	return nil
 }
 
-// StopContainer transitions a running container to "exited".
+// StopContainer transitions a running container to "exited" and unblocks any
+// goroutines blocked in WaitContainer for this container.
 func (e *Fake) StopContainer(_ context.Context, id currus.ContainerID, _ currus.StopContainerOpts) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -203,6 +211,10 @@ func (e *Fake) StopContainer(_ context.Context, id currus.ContainerID, _ currus.
 		return fmt.Errorf("currustest: stop %s: %w: not running", id, currus.ErrConflict)
 	}
 	c.state = "exited"
+	if ch, hasCh := e.waitChs[id]; hasCh {
+		close(ch)
+		delete(e.waitChs, id)
+	}
 
 	return nil
 }
@@ -324,19 +336,37 @@ func (e *Fake) Stats(_ context.Context, id currus.ContainerID, _ currus.StatsOpt
 }
 
 // WaitContainer implements currus.Waiter.
-// The fake returns a channel that immediately yields StatusCode 0 for stopped
-// containers, and blocks until Stop is called for running ones.
-func (e *Fake) WaitContainer(_ context.Context, id currus.ContainerID, _ currus.WaitContainerOpts) (<-chan currus.WaitResult, error) {
+// For stopped or created containers the result channel yields StatusCode 0
+// immediately. For running containers it blocks until StopContainer is called
+// or the context is canceled.
+func (e *Fake) WaitContainer(ctx context.Context, id currus.ContainerID, _ currus.WaitContainerOpts) (<-chan currus.WaitResult, error) {
 	e.mu.RLock()
-	_, ok := e.containers[id]
+	c, ok := e.containers[id]
+	stopCh := e.waitChs[id]
 	e.mu.RUnlock()
+
 	if !ok {
 		return nil, fmt.Errorf("currustest: wait %s: %w", id, currus.ErrNotFound)
 	}
+
 	out := make(chan currus.WaitResult, 1)
-	// The fake does not support real blocking wait; signal exit 0 immediately.
-	out <- currus.WaitResult{StatusCode: 0}
-	close(out)
+
+	if c.state != "running" || stopCh == nil {
+		out <- currus.WaitResult{StatusCode: 0}
+		close(out)
+
+		return out, nil
+	}
+
+	go func() {
+		defer close(out)
+		select {
+		case <-stopCh:
+			out <- currus.WaitResult{StatusCode: 0}
+		case <-ctx.Done():
+			out <- currus.WaitResult{Error: ctx.Err().Error()}
+		}
+	}()
 
 	return out, nil
 }

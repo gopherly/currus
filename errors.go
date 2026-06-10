@@ -14,7 +14,12 @@
 
 package currus
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+
+	cerrdefs "github.com/containerd/errdefs"
+)
 
 // Sentinel errors returned by all Engine implementations.
 // Use [errors.Is] to compare; all errors may be wrapped.
@@ -49,3 +54,21 @@ var (
 	// information fails during engine initialization.
 	ErrDaemonInfo = errors.New("daemon info query failed")
 )
+
+// mapContainerErr translates containerd/errdefs error types into the sentinel
+// taxonomy shared by both the Docker and containerd drivers.
+func mapContainerErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	switch {
+	case cerrdefs.IsNotFound(err):
+		return fmt.Errorf("%w: %w", ErrNotFound, err)
+	case cerrdefs.IsAlreadyExists(err):
+		return fmt.Errorf("%w: %w", ErrAlreadyExists, err)
+	case cerrdefs.IsConflict(err):
+		return fmt.Errorf("%w: %w", ErrConflict, err)
+	default:
+		return err
+	}
+}
