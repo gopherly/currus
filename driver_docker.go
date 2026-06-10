@@ -23,6 +23,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -219,6 +220,10 @@ func (e *dockerEngine) CreateContainer(ctx context.Context, spec ContainerSpec) 
 		Env:        spec.Env,
 		WorkingDir: spec.WorkingDir,
 		Labels:     spec.Labels,
+		User:       spec.Security.User,
+	}
+	if spec.Hostname != "" {
+		cfg.Hostname = spec.Hostname
 	}
 	if len(spec.Command) > 0 {
 		cfg.Entrypoint = spec.Command
@@ -240,6 +245,23 @@ func (e *dockerEngine) CreateContainer(ctx context.Context, spec ContainerSpec) 
 			NanoCPUs: spec.Resources.NanoCPUs,
 			Memory:   spec.Resources.MemoryBytes,
 		},
+		Privileged:  spec.Security.Privileged,
+		CapAdd:      capStrings(spec.Security.AddCapabilities),
+		CapDrop:     capStrings(spec.Security.DropCapabilities),
+		GroupAdd:    spec.Security.Groups,
+		SecurityOpt: spec.Security.SecurityOpts,
+		DNSSearch:   spec.DNS.Search,
+		DNSOptions:  spec.DNS.Options,
+		ExtraHosts:  spec.ExtraHosts,
+	}
+	dnsAddrs, err := dockerConvertDNS(spec.DNS.Servers)
+	if err != nil {
+		return "", err
+	}
+	hc.DNS = dnsAddrs
+	if spec.Init {
+		t := true
+		hc.Init = &t
 	}
 
 	// Attach the first network at create time so the container is on it
@@ -493,6 +515,27 @@ func (e *dockerEngine) Inspect(ctx context.Context, id ContainerID) (ContainerIn
 			Target:   m.Destination,
 			ReadOnly: !m.RW,
 		})
+	}
+
+	if c.Config != nil {
+		info.Security.User = c.Config.User
+		info.Hostname = c.Config.Hostname
+	}
+	if c.HostConfig != nil {
+		info.Security.Privileged = c.HostConfig.Privileged
+		info.Security.AddCapabilities = strCaps(c.HostConfig.CapAdd)
+		info.Security.DropCapabilities = strCaps(c.HostConfig.CapDrop)
+		info.Security.Groups = c.HostConfig.GroupAdd
+		info.Security.SecurityOpts = c.HostConfig.SecurityOpt
+		info.DNS = DNS{
+			Servers: dockerDNSToStrings(c.HostConfig.DNS),
+			Search:  c.HostConfig.DNSSearch,
+			Options: c.HostConfig.DNSOptions,
+		}
+		info.ExtraHosts = c.HostConfig.ExtraHosts
+		if c.HostConfig.Init != nil && *c.HostConfig.Init {
+			info.Init = true
+		}
 	}
 
 	return info, nil
@@ -901,4 +944,66 @@ func dockerConvertRestartPolicy(rp RestartPolicy) container.RestartPolicy {
 		Name:              container.RestartPolicyMode(rp.Mode),
 		MaximumRetryCount: rp.MaxRetries,
 	}
+}
+
+// capStrings converts a slice of [Capability] values to plain strings for
+// Docker/Podman APIs.
+func capStrings(caps []Capability) []string {
+	if len(caps) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(caps))
+	for _, c := range caps {
+		out = append(out, string(c))
+	}
+
+	return out
+}
+
+// strCaps converts a slice of plain capability strings from the Docker API
+// into [Capability] values. Docker's inspect response normalizes capability
+// names with a "CAP_" prefix; this function strips it so the values match
+// the Cap* constants defined in spec.go.
+func strCaps(ss []string) []Capability {
+	if len(ss) == 0 {
+		return nil
+	}
+	out := make([]Capability, 0, len(ss))
+	for _, s := range ss {
+		out = append(out, Capability(strings.TrimPrefix(s, "CAP_")))
+	}
+
+	return out
+}
+
+// dockerConvertDNS parses DNS server strings into [netip.Addr] values.
+// Returns a wrapped ErrInvalidSpec if any address cannot be parsed.
+func dockerConvertDNS(servers []string) ([]netip.Addr, error) {
+	if len(servers) == 0 {
+		return nil, nil
+	}
+	out := make([]netip.Addr, 0, len(servers))
+	for _, s := range servers {
+		addr, err := netip.ParseAddr(s)
+		if err != nil {
+			return nil, fmt.Errorf("%w: DNS server %q: %w", ErrInvalidSpec, s, err)
+		}
+		out = append(out, addr)
+	}
+
+	return out, nil
+}
+
+// dockerDNSToStrings converts [netip.Addr] DNS servers from Docker inspect
+// back to plain strings.
+func dockerDNSToStrings(addrs []netip.Addr) []string {
+	if len(addrs) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(addrs))
+	for _, a := range addrs {
+		out = append(out, a.String())
+	}
+
+	return out
 }

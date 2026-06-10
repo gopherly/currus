@@ -320,6 +320,22 @@ func TestFakeInspect(t *testing.T) {
 		Env:        []string{"FOO=bar"},
 		WorkingDir: "/app",
 		Labels:     map[string]string{"env": "test"},
+		Hostname:   "box",
+		ExtraHosts: []string{"db:10.0.0.1"},
+		Init:       true,
+		Security: currus.Security{
+			User:             "1000:1000",
+			Groups:           []string{"docker"},
+			Privileged:       false,
+			AddCapabilities:  []currus.Capability{currus.CapNetBindService},
+			DropCapabilities: []currus.Capability{currus.CapAll},
+			SecurityOpts:     []string{"no-new-privileges"},
+		},
+		DNS: currus.DNS{
+			Servers: []string{"8.8.8.8"},
+			Search:  []string{"example.com"},
+			Options: []string{"ndots:5"},
+		},
 	}
 	id, err := eng.CreateContainer(ctx, spec)
 	require.NoError(t, err)
@@ -335,6 +351,21 @@ func TestFakeInspect(t *testing.T) {
 		assert.Equal(t, spec.WorkingDir, info.WorkingDir)
 		assert.Equal(t, spec.Env, info.Env)
 		assert.False(t, info.State.Running)
+		// Security
+		assert.Equal(t, spec.Security.User, info.Security.User)
+		assert.Equal(t, spec.Security.Groups, info.Security.Groups)
+		assert.Equal(t, spec.Security.Privileged, info.Security.Privileged)
+		assert.Equal(t, spec.Security.AddCapabilities, info.Security.AddCapabilities)
+		assert.Equal(t, spec.Security.DropCapabilities, info.Security.DropCapabilities)
+		assert.Equal(t, spec.Security.SecurityOpts, info.Security.SecurityOpts)
+		// DNS
+		assert.Equal(t, spec.DNS.Servers, info.DNS.Servers)
+		assert.Equal(t, spec.DNS.Search, info.DNS.Search)
+		assert.Equal(t, spec.DNS.Options, info.DNS.Options)
+		// Hostname, ExtraHosts, Init
+		assert.Equal(t, spec.Hostname, info.Hostname)
+		assert.Equal(t, spec.ExtraHosts, info.ExtraHosts)
+		assert.Equal(t, spec.Init, info.Init)
 	})
 
 	t.Run("running container shows Running=true", func(t *testing.T) {

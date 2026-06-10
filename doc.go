@@ -118,6 +118,30 @@
 // The [Networker] capability also exposes [Networker.ConnectContainer] and
 // [Networker.DisconnectContainer] for attaching and detaching after start.
 //
+// # Security, DNS, and init
+//
+// [ContainerSpec.Security] controls the container's security posture:
+// process identity ([Security.User]), supplementary groups, privileged mode,
+// and Linux capability adjustments ([Security.AddCapabilities] /
+// [Security.DropCapabilities]). A common hardening pattern is:
+//
+//	id, err := eng.CreateContainer(ctx, currus.ContainerSpec{
+//	    Image: "ghcr.io/example/app:latest",
+//	    Security: currus.Security{
+//	        User:             "1000:1000",
+//	        DropCapabilities: []currus.Capability{currus.CapAll},
+//	        AddCapabilities:  []currus.Capability{currus.CapNetBindService},
+//	    },
+//	})
+//
+// Docker and Podman honor all Security fields. The containerd driver maps
+// User, Privileged, AddCapabilities, and DropCapabilities via OCI spec opts;
+// Groups and SecurityOpts are silently ignored.
+//
+// [ContainerSpec.DNS], [ContainerSpec.Hostname], [ContainerSpec.ExtraHosts],
+// and [ContainerSpec.Init] are honored by Docker and Podman; containerd
+// ignores them.
+//
 // # Resolved endpoint
 //
 // The [EndpointReporter] capability exposes the URI the engine actually
@@ -152,6 +176,24 @@
 //	Volumer          │ ✓      │ ✓      │ —
 //	Copier           │ ✓      │ ✓      │ —
 //	EndpointReporter │ ✓      │ ✓      │ ✓
+//
+// # ContainerSpec field support
+//
+// The following table shows which [ContainerSpec] fields each engine honors.
+// A "—" means the field is silently ignored by that engine.
+//
+//	Field                      │ Docker │ Podman │ containerd
+//	───────────────────────────┼────────┼────────┼───────────
+//	Security.User              │ ✓      │ ✓      │ ✓
+//	Security.Privileged        │ ✓      │ ✓      │ ✓
+//	Security.AddCapabilities   │ ✓      │ ✓      │ ✓
+//	Security.DropCapabilities  │ ✓      │ ✓      │ ✓
+//	Security.Groups            │ ✓      │ ✓      │ —
+//	Security.SecurityOpts      │ ✓      │ ✓      │ —
+//	DNS                        │ ✓      │ ✓      │ —
+//	Hostname                   │ ✓      │ ✓      │ —
+//	ExtraHosts                 │ ✓      │ ✓      │ —
+//	Init                       │ ✓      │ ✓      │ —
 //
 // # Error handling
 //

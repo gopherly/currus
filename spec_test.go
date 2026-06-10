@@ -48,6 +48,35 @@ func TestContainerSpecValidate(t *testing.T) {
 			},
 		},
 		{
+			name: "valid spec with security and DNS fields",
+			spec: ContainerSpec{
+				Image:      "alpine:latest",
+				Hostname:   "app-host",
+				ExtraHosts: []string{"db:10.0.0.1"},
+				Init:       true,
+				Security: Security{
+					User:             "1000:1000",
+					Groups:           []string{"docker"},
+					Privileged:       false,
+					AddCapabilities:  []Capability{CapNetBindService},
+					DropCapabilities: []Capability{CapAll},
+					SecurityOpts:     []string{"no-new-privileges"},
+				},
+				DNS: DNS{
+					Servers: []string{"8.8.8.8"},
+					Search:  []string{"example.com"},
+					Options: []string{"ndots:5"},
+				},
+			},
+		},
+		{
+			name: "privileged spec is valid",
+			spec: ContainerSpec{
+				Image:    "alpine:latest",
+				Security: Security{Privileged: true},
+			},
+		},
+		{
 			name:    "empty image returns ErrInvalidSpec",
 			spec:    ContainerSpec{},
 			wantErr: ErrInvalidSpec,

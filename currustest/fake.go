@@ -267,6 +267,11 @@ func (e *Fake) Inspect(_ context.Context, id currus.ContainerID) (currus.Contain
 		Env:        c.spec.Env,
 		WorkingDir: c.spec.WorkingDir,
 		Mounts:     c.spec.Mounts,
+		Security:   c.spec.Security,
+		DNS:        c.spec.DNS,
+		Hostname:   c.spec.Hostname,
+		ExtraHosts: c.spec.ExtraHosts,
+		Init:       c.spec.Init,
 	}, nil
 }
 

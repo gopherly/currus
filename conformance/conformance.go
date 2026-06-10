@@ -585,4 +585,51 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 		assert.NotEmptyf(t, ep.Host, "EndpointReporter.Endpoint().Host must not be empty")
 		t.Logf("endpoint: host=%q namespace=%q", ep.Host, ep.Namespace)
 	})
+
+	t.Run("SecurityAndDNS", func(t *testing.T) {
+		t.Parallel()
+		eng := newEngine(t)
+
+		ins, ok := eng.(currus.Inspector)
+		if !ok {
+			t.Skip("engine does not implement currus.Inspector; skipping security/DNS tests")
+		}
+
+		ctx := t.Context()
+		_ = eng.PullImage(ctx, TestImage, currus.PullImageOpts{}) //nolint:errcheck // best-effort: image may already be present
+
+		id, err := eng.CreateContainer(ctx, currus.ContainerSpec{
+			Image:      TestImage,
+			Name:       name("security"),
+			Command:    []string{"sleep"},
+			Args:       []string{"30"},
+			Hostname:   "test-host",
+			ExtraHosts: []string{"db:10.0.0.1"},
+			Init:       true,
+			Security: currus.Security{
+				User:             "0",
+				DropCapabilities: []currus.Capability{currus.CapAll},
+				AddCapabilities:  []currus.Capability{currus.CapNetBindService},
+			},
+			DNS: currus.DNS{
+				Servers: []string{"8.8.8.8"},
+				Search:  []string{"example.com"},
+			},
+		})
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_ = eng.RemoveContainer(ctx, id, currus.RemoveContainerOpts{Force: true}) //nolint:errcheck // best-effort cleanup
+		})
+
+		info, err := ins.Inspect(ctx, id)
+		require.NoError(t, err)
+		assert.Equal(t, "0", info.Security.User)
+		assert.Equal(t, "test-host", info.Hostname)
+		assert.True(t, info.Init)
+		assert.Contains(t, info.Security.DropCapabilities, currus.CapAll)
+		assert.Contains(t, info.Security.AddCapabilities, currus.CapNetBindService)
+		assert.Equal(t, []string{"8.8.8.8"}, info.DNS.Servers)
+		assert.Equal(t, []string{"example.com"}, info.DNS.Search)
+		assert.Contains(t, info.ExtraHosts, "db:10.0.0.1")
+	})
 }

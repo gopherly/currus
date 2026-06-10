@@ -290,6 +290,139 @@ func TestMapDockerErr(t *testing.T) {
 	}
 }
 
+// TestCapStrings verifies that capStrings converts Capability values to plain
+// strings correctly, returning nil for empty input.
+func TestCapStrings(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil returns nil", func(t *testing.T) {
+		t.Parallel()
+		assert.Nil(t, capStrings(nil))
+	})
+
+	t.Run("empty returns nil", func(t *testing.T) {
+		t.Parallel()
+		assert.Nil(t, capStrings([]Capability{}))
+	})
+
+	t.Run("converts known constants", func(t *testing.T) {
+		t.Parallel()
+		got := capStrings([]Capability{CapNetAdmin, CapSysAdmin, CapAll})
+		require.Equal(t, []string{"NET_ADMIN", "SYS_ADMIN", "ALL"}, got)
+	})
+
+	t.Run("preserves raw capability strings", func(t *testing.T) {
+		t.Parallel()
+		got := capStrings([]Capability{Capability("CUSTOM_CAP")})
+		require.Equal(t, []string{"CUSTOM_CAP"}, got)
+	})
+}
+
+// TestStrCaps verifies that strCaps converts plain strings back into Capability
+// values, returning nil for empty input.
+func TestStrCaps(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil returns nil", func(t *testing.T) {
+		t.Parallel()
+		assert.Nil(t, strCaps(nil))
+	})
+
+	t.Run("empty returns nil", func(t *testing.T) {
+		t.Parallel()
+		assert.Nil(t, strCaps([]string{}))
+	})
+
+	t.Run("converts to Capability values", func(t *testing.T) {
+		t.Parallel()
+		got := strCaps([]string{"NET_ADMIN", "SYS_ADMIN", "ALL"})
+		require.Equal(t, []Capability{CapNetAdmin, CapSysAdmin, CapAll}, got)
+	})
+
+	t.Run("strips CAP_ prefix from Docker inspect output", func(t *testing.T) {
+		t.Parallel()
+		got := strCaps([]string{"CAP_NET_ADMIN", "CAP_SYS_ADMIN", "CAP_ALL"})
+		require.Equal(t, []Capability{CapNetAdmin, CapSysAdmin, CapAll}, got)
+	})
+
+	t.Run("handles mixed prefixed and bare names", func(t *testing.T) {
+		t.Parallel()
+		got := strCaps([]string{"CAP_NET_BIND_SERVICE", "SYS_PTRACE"})
+		require.Equal(t, []Capability{CapNetBindService, CapSysPtrace}, got)
+	})
+}
+
+// TestDockerConvertDNS verifies that dockerConvertDNS parses valid IP strings
+// into [netip.Addr] values and wraps ErrInvalidSpec for malformed input.
+func TestDockerConvertDNS(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil returns nil without error", func(t *testing.T) {
+		t.Parallel()
+		got, err := dockerConvertDNS(nil)
+		require.NoError(t, err)
+		assert.Nil(t, got)
+	})
+
+	t.Run("empty returns nil without error", func(t *testing.T) {
+		t.Parallel()
+		got, err := dockerConvertDNS([]string{})
+		require.NoError(t, err)
+		assert.Nil(t, got)
+	})
+
+	t.Run("valid IPv4 addresses parse correctly", func(t *testing.T) {
+		t.Parallel()
+		got, err := dockerConvertDNS([]string{"8.8.8.8", "1.1.1.1"})
+		require.NoError(t, err)
+		require.Len(t, got, 2)
+		assert.Equal(t, "8.8.8.8", got[0].String())
+		assert.Equal(t, "1.1.1.1", got[1].String())
+	})
+
+	t.Run("valid IPv6 address parses correctly", func(t *testing.T) {
+		t.Parallel()
+		got, err := dockerConvertDNS([]string{"2001:4860:4860::8888"})
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		assert.True(t, got[0].Is6())
+	})
+
+	t.Run("invalid address returns ErrInvalidSpec", func(t *testing.T) {
+		t.Parallel()
+		_, err := dockerConvertDNS([]string{"not-an-ip"})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidSpec)
+	})
+
+	t.Run("hostname string returns ErrInvalidSpec", func(t *testing.T) {
+		t.Parallel()
+		_, err := dockerConvertDNS([]string{"dns.example.com"})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidSpec)
+	})
+}
+
+// TestDockerDNSToStrings verifies that dockerDNSToStrings converts [netip.Addr]
+// values back to their string representation.
+func TestDockerDNSToStrings(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil returns nil", func(t *testing.T) {
+		t.Parallel()
+		assert.Nil(t, dockerDNSToStrings(nil))
+	})
+
+	t.Run("round-trips through dockerConvertDNS", func(t *testing.T) {
+		t.Parallel()
+		input := []string{"8.8.8.8", "8.8.4.4"}
+		addrs, err := dockerConvertDNS(input)
+		require.NoError(t, err)
+		got := dockerDNSToStrings(addrs)
+		assert.Equal(t, input, got)
+	})
+}
+
 // TestDockerNetInputOutput verifies that dockerNetInput and dockerNetOutput
 // sum received and transmitted bytes across all network interfaces.
 func TestDockerNetInputOutput(t *testing.T) {

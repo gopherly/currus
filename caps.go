@@ -231,6 +231,11 @@ type ContainerInfo struct {
 	Env        []string
 	WorkingDir string
 	Mounts     []Mount
+	Security   Security
+	DNS        DNS
+	Hostname   string
+	ExtraHosts []string
+	Init       bool
 }
 
 // ContainerState holds the runtime state of an inspected container.

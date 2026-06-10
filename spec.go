@@ -48,6 +48,23 @@ type ContainerSpec struct {
 	Restart RestartPolicy
 	// Networks lists the networks to join at creation time, in order.
 	Networks []NetworkAttachment
+	// Security configures the container's security posture (user, capabilities,
+	// privileged mode). Zero value means engine defaults.
+	// Docker and Podman honor all fields. containerd maps User, Privileged,
+	// AddCapabilities, and DropCapabilities; other fields are ignored.
+	Security Security
+	// DNS configures container DNS resolution.
+	// Honored by Docker and Podman; ignored by containerd.
+	DNS DNS
+	// Hostname sets the container's hostname. Empty uses the engine default.
+	// Honored by Docker and Podman; ignored by containerd.
+	Hostname string
+	// ExtraHosts adds custom host-to-IP mappings in "host:ip" format
+	// (e.g. "db:10.0.0.1"). Honored by Docker and Podman; ignored by containerd.
+	ExtraHosts []string
+	// Init enables an init process (PID 1) for signal forwarding and zombie
+	// reaping. Honored by Docker and Podman; ignored by containerd.
+	Init bool
 }
 
 // Validate reports whether the spec is well-formed, returning a wrapped
@@ -140,4 +157,88 @@ type RestartPolicy struct {
 	// MaxRetries is the maximum number of restart attempts. Only meaningful
 	// with RestartOnFailure; ignored otherwise.
 	MaxRetries int
+}
+
+// Capability is a Linux capability name (e.g. "NET_ADMIN", "SYS_PTRACE").
+// Use the Cap* constants for discoverability; any valid capability string can
+// be cast directly: Capability("CUSTOM_CAP").
+type Capability string
+
+const (
+	// CapAll represents all capabilities. Commonly used with DropCapabilities
+	// for a drop-all-then-add pattern.
+	CapAll Capability = "ALL"
+	// CapAuditWrite allows writing to the kernel audit log.
+	CapAuditWrite Capability = "AUDIT_WRITE"
+	// CapChown allows arbitrary changes to file UIDs and GIDs.
+	CapChown Capability = "CHOWN"
+	// CapDacOverride bypasses read, write, and execute permission checks.
+	CapDacOverride Capability = "DAC_OVERRIDE"
+	// CapDacReadSearch bypasses read permission checks and directory execute checks.
+	CapDacReadSearch Capability = "DAC_READ_SEARCH"
+	// CapFowner bypasses permission checks for operations that require the
+	// filesystem UID to match the file UID.
+	CapFowner Capability = "FOWNER"
+	// CapIpcLock allows locking of shared memory segments.
+	CapIpcLock Capability = "IPC_LOCK"
+	// CapKill allows sending signals to processes of any UID.
+	CapKill Capability = "KILL"
+	// CapMknod allows creating special files using mknod.
+	CapMknod Capability = "MKNOD"
+	// CapNetAdmin allows various network administration operations.
+	CapNetAdmin Capability = "NET_ADMIN"
+	// CapNetBindService allows binding to ports below 1024.
+	CapNetBindService Capability = "NET_BIND_SERVICE"
+	// CapNetRaw allows use of RAW and PACKET sockets.
+	CapNetRaw Capability = "NET_RAW"
+	// CapSetfcap allows setting arbitrary capabilities on files.
+	CapSetfcap Capability = "SETFCAP"
+	// CapSetgid allows manipulating process GIDs and supplementary GID list.
+	CapSetgid Capability = "SETGID"
+	// CapSetuid allows manipulating process UIDs.
+	CapSetuid Capability = "SETUID"
+	// CapSysAdmin allows a range of system administration operations.
+	CapSysAdmin Capability = "SYS_ADMIN"
+	// CapSysModule allows loading and unloading kernel modules.
+	CapSysModule Capability = "SYS_MODULE"
+	// CapSysPtrace allows tracing arbitrary processes using ptrace.
+	CapSysPtrace Capability = "SYS_PTRACE"
+	// CapSysRawio allows I/O port operations and raw disk access.
+	CapSysRawio Capability = "SYS_RAWIO"
+	// CapSysResource allows overriding resource limits.
+	CapSysResource Capability = "SYS_RESOURCE"
+	// CapSysTime allows setting the system clock.
+	CapSysTime Capability = "SYS_TIME"
+)
+
+// Security configures the container's security posture. The zero value means
+// no overrides: the engine applies its default security settings.
+type Security struct {
+	// User is the container process identity (e.g. "root", "1000:1000", "nobody").
+	// Passed through to the engine as-is.
+	User string
+	// Groups lists supplementary group names or numeric GIDs.
+	// Honored by Docker and Podman; ignored by containerd.
+	Groups []string
+	// Privileged grants full host device access.
+	Privileged bool
+	// AddCapabilities lists Linux capabilities to grant beyond the default set.
+	AddCapabilities []Capability
+	// DropCapabilities lists Linux capabilities to revoke from the default set.
+	// Use CapAll to drop all capabilities, then re-add only what is needed.
+	DropCapabilities []Capability
+	// SecurityOpts are pass-through security options (e.g. "seccomp=unconfined",
+	// "label=disable"). Honored by Docker and Podman; ignored by containerd.
+	SecurityOpts []string
+}
+
+// DNS configures container DNS resolution. The zero value means the engine
+// applies its default resolver settings.
+type DNS struct {
+	// Servers lists nameserver IP addresses (e.g. "8.8.8.8").
+	Servers []string
+	// Search lists DNS search domains (e.g. "example.com").
+	Search []string
+	// Options lists resolver options (e.g. "ndots:5").
+	Options []string
 }

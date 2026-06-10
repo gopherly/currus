@@ -209,6 +209,20 @@ func (e *containerdEngine) CreateContainer(ctx context.Context, spec ContainerSp
 	if len(spec.Env) > 0 {
 		specOpts = append(specOpts, oci.WithEnv(spec.Env))
 	}
+	if spec.Security.User != "" {
+		specOpts = append(specOpts, oci.WithUser(spec.Security.User))
+	}
+	if spec.Security.Privileged {
+		specOpts = append(specOpts, oci.WithPrivileged)
+	}
+	if len(spec.Security.AddCapabilities) > 0 {
+		specOpts = append(specOpts, oci.WithAddedCapabilities(capStrings(spec.Security.AddCapabilities)))
+	}
+	if len(spec.Security.DropCapabilities) > 0 {
+		specOpts = append(specOpts, oci.WithDroppedCapabilities(capStrings(spec.Security.DropCapabilities)))
+	}
+	// Groups, SecurityOpts, DNS, Hostname, ExtraHosts, and Init are not
+	// supported by the containerd driver and are silently ignored.
 
 	c, err := e.cli.NewContainer(nctx, id,
 		containerd.WithImage(img),
