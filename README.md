@@ -261,9 +261,11 @@ The full set of capability interfaces:
 For traits that are not method-shaped, call `eng.Capabilities()`. It returns a
 `Caps` value with these fields:
 
-- `RootlessCapable` reports whether the driver runs rootless.
-- `SupportsPods` reports whether the engine groups containers into pods.
-- `OneShotRun` reports whether the engine can run a container in a single call.
+- `Rootless` is `true` when the daemon is running without root privileges. For
+  Docker and Podman this is detected by querying the daemon at engine
+  initialization time (`docker info` / `podman info`). For containerd it is
+  inferred from the socket path: a socket under `$XDG_RUNTIME_DIR` is treated
+  as rootless.
 - `NamespaceModel` names the isolation model, for example `"containerd"`.
 
 ## Logging and tracing
@@ -309,6 +311,21 @@ func TestStartsCache(t *testing.T) {
     eng := currustest.New() // *currustest.Fake: implements Engine and every capability interface
     // ... drive the same code path against the fake ...
 }
+```
+
+Use functional options to configure the fake's reported identity and capabilities:
+
+```go
+eng := currustest.New(
+    currustest.WithKind(currus.Docker),
+    currustest.WithCaps(currus.Caps{Rootless: true}),
+    currustest.WithEndpoint(currus.Endpoint{
+        Host:         "unix:///var/run/docker.sock",
+        DaemonSocket: "/var/run/docker.sock",
+    }),
+)
+// eng.Kind()                  == currus.Docker
+// eng.Capabilities().Rootless == true
 ```
 
 The [`conformance`](conformance/) package holds a shared behavioural test suite

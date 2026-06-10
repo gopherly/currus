@@ -28,18 +28,6 @@ import (
 	cerrdefs "github.com/containerd/errdefs"
 )
 
-// TestBuildDockerCaps verifies that buildDockerCaps sets RootlessCapable
-// correctly for the Docker and Podman engine variants.
-func TestBuildDockerCaps(t *testing.T) {
-	t.Parallel()
-
-	dockerCaps := buildDockerCaps(dockerKindDocker)
-	assert.False(t, dockerCaps.RootlessCapable)
-
-	podmanCaps := buildDockerCaps(dockerKindPodman)
-	assert.True(t, podmanCaps.RootlessCapable)
-}
-
 // TestDockerConvertMounts verifies that dockerConvertMounts maps
 // ContainerSpec mounts to the Moby host-config mount format.
 func TestDockerConvertMounts(t *testing.T) {
@@ -421,6 +409,30 @@ func TestDockerDNSToStrings(t *testing.T) {
 		got := dockerDNSToStrings(addrs)
 		assert.Equal(t, input, got)
 	})
+}
+
+// TestIsRootless verifies that isRootless detects the "name=rootless" security
+// option emitted by rootless Docker and Podman daemons.
+func TestIsRootless(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		opts []string
+		want bool
+	}{
+		{"rootless only", []string{"name=rootless"}, true},
+		{"rootless among others", []string{"name=seccomp", "name=rootless", "name=apparmor"}, true},
+		{"rootless absent", []string{"name=seccomp", "name=apparmor"}, false},
+		{"empty", nil, false},
+		{"partial match does not count", []string{"name=rootless-extra"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, isRootless(tt.opts))
+		})
+	}
 }
 
 // TestDockerNetInputOutput verifies that dockerNetInput and dockerNetOutput

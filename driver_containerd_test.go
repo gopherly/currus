@@ -95,7 +95,11 @@ func TestContainerdEngineKind(t *testing.T) {
 // containerd-specific namespace model.
 func TestContainerdCapabilities(t *testing.T) {
 	t.Parallel()
-	e := &containerdEngine{namespace: defaultContainerdNamespace, logger: slog.Default()}
+	e := &containerdEngine{
+		namespace: defaultContainerdNamespace,
+		caps:      Caps{NamespaceModel: "containerd"},
+		logger:    slog.Default(),
+	}
 	assert.Equal(t, "containerd", e.Capabilities().NamespaceModel)
 }
 

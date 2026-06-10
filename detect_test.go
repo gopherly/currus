@@ -118,7 +118,7 @@ func TestPodmanRootlessSocket(t *testing.T) {
 // that wraps ErrUnsupported.
 func TestOpenKindUnsupported(t *testing.T) {
 	t.Parallel()
-	_, err := openKind("bogus", buildEngineConfig(nil))
+	_, err := openKind(t.Context(), "bogus", buildEngineConfig(nil))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrUnsupported)
 }
@@ -128,7 +128,7 @@ func TestOpenKindUnsupported(t *testing.T) {
 func TestOpenKindDockerTLSError(t *testing.T) {
 	t.Parallel()
 	ep := Endpoint{TLS: &TLSConfig{Cert: []byte("not-a-cert"), Key: []byte("not-a-key")}}
-	_, err := openKind(Docker, buildEngineConfig([]Option{WithEndpoint(ep)}))
+	_, err := openKind(t.Context(), Docker, buildEngineConfig([]Option{WithEndpoint(ep)}))
 	assert.Error(t, err)
 }
 
@@ -137,25 +137,34 @@ func TestOpenKindDockerTLSError(t *testing.T) {
 func TestOpenKindPodmanTLSError(t *testing.T) {
 	t.Parallel()
 	ep := Endpoint{TLS: &TLSConfig{Cert: []byte("not-a-cert"), Key: []byte("not-a-key")}}
-	_, err := openKind(Podman, buildEngineConfig([]Option{WithEndpoint(ep)}))
+	_, err := openKind(t.Context(), Podman, buildEngineConfig([]Option{WithEndpoint(ep)}))
 	assert.Error(t, err)
 }
 
-// TestOpenKindDocker verifies that openKind returns a Docker-kind engine for
-// the Docker backend. The moby client is lazy so no daemon is required.
+// TestOpenKindDocker verifies that openKind returns a Docker-kind engine.
+// This test is daemon-adaptive: when no daemon is reachable, the resolveInfo
+// step will fail with ErrDaemonInfo and the test verifies that error.
 func TestOpenKindDocker(t *testing.T) {
 	t.Parallel()
-	eng, err := openKind(Docker, buildEngineConfig(nil))
-	require.NoError(t, err)
+	eng, err := openKind(t.Context(), Docker, buildEngineConfig(nil))
+	if err != nil {
+		assert.ErrorIs(t, err, ErrDaemonInfo)
+		return
+	}
 	t.Cleanup(func() { assert.NoError(t, eng.Close()) })
 	assert.Equal(t, Docker, eng.Kind())
 }
 
 // TestOpenKindPodman verifies that openKind returns a Podman-kind engine.
+// This test is daemon-adaptive: when no daemon is reachable, the resolveInfo
+// step will fail with ErrDaemonInfo and the test verifies that error.
 func TestOpenKindPodman(t *testing.T) {
 	t.Parallel()
-	eng, err := openKind(Podman, buildEngineConfig(nil))
-	require.NoError(t, err)
+	eng, err := openKind(t.Context(), Podman, buildEngineConfig(nil))
+	if err != nil {
+		assert.ErrorIs(t, err, ErrDaemonInfo)
+		return
+	}
 	t.Cleanup(func() { assert.NoError(t, eng.Close()) })
 	assert.Equal(t, Podman, eng.Kind())
 }
@@ -172,7 +181,7 @@ func TestOpenKindContainerd(t *testing.T) {
 	t.Cleanup(func() { assert.NoError(t, l.Close()) })
 
 	cfg := buildEngineConfig([]Option{WithEndpoint(Endpoint{Host: sock, Namespace: "testns"})})
-	eng, err := openKind(Containerd, cfg)
+	eng, err := openKind(t.Context(), Containerd, cfg)
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, eng.Close()) })
 	assert.Equal(t, Containerd, eng.Kind())
@@ -195,12 +204,16 @@ func TestMustNewPanic(t *testing.T) {
 	})
 }
 
-// TestNewViaEnvEngine verifies the CONTAINER_ENGINE env-var path. The moby
-// client is lazy, so no real daemon is required.
+// TestNewViaEnvEngine verifies the CONTAINER_ENGINE env-var path.
+// This test is daemon-adaptive: when no Docker daemon is reachable, the
+// resolveInfo step fails with ErrDaemonInfo and the test verifies that error.
 func TestNewViaEnvEngine(t *testing.T) {
 	t.Setenv("CONTAINER_ENGINE", "docker")
 	eng, err := New(t.Context())
-	require.NoError(t, err)
+	if err != nil {
+		assert.ErrorIs(t, err, ErrDaemonInfo)
+		return
+	}
 	t.Cleanup(func() { assert.NoError(t, eng.Close()) })
 	assert.Equal(t, Docker, eng.Kind())
 }
@@ -376,22 +389,26 @@ func TestDockerTLSFromEnv(t *testing.T) {
 	})
 }
 
-// TestEnvEndpoint covers the full envEndpoint resolution logic without
-// requiring a running daemon. The moby client is lazy; creating an engine
-// with a non-existent host succeeds at construction time.
+// TestEnvEndpoint covers the full envEndpoint resolution logic.
+// Tests that involve a fake (non-existent) daemon socket are daemon-adaptive:
+// they accept either a successful engine (if a daemon happens to listen there)
+// or an ErrDaemonInfo error (no daemon; resolveInfo fails after construction).
 func TestEnvEndpoint(t *testing.T) {
 	t.Run("none set returns nil nil", func(t *testing.T) {
 		clearDockerEnv(t)
-		eng, err := envEndpoint(buildEngineConfig(nil))
+		eng, err := envEndpoint(t.Context(), buildEngineConfig(nil))
 		require.NoError(t, err)
 		assert.Nil(t, eng)
 	})
 
-	t.Run("DOCKER_HOST returns Docker engine", func(t *testing.T) {
+	t.Run("DOCKER_HOST returns Docker engine or ErrDaemonInfo", func(t *testing.T) {
 		clearDockerEnv(t)
 		t.Setenv("DOCKER_HOST", "unix:///tmp/fake.sock")
-		eng, err := envEndpoint(buildEngineConfig(nil))
-		require.NoError(t, err)
+		eng, err := envEndpoint(t.Context(), buildEngineConfig(nil))
+		if err != nil {
+			assert.ErrorIs(t, err, ErrDaemonInfo)
+			return
+		}
 		require.NotNil(t, eng)
 		t.Cleanup(func() {
 			if closeErr := eng.Close(); closeErr != nil {
@@ -401,11 +418,14 @@ func TestEnvEndpoint(t *testing.T) {
 		assert.Equal(t, Docker, eng.Kind())
 	})
 
-	t.Run("CONTAINER_HOST returns Podman engine", func(t *testing.T) {
+	t.Run("CONTAINER_HOST returns Podman engine or ErrDaemonInfo", func(t *testing.T) {
 		clearDockerEnv(t)
 		t.Setenv("CONTAINER_HOST", "unix:///tmp/fake-podman.sock")
-		eng, err := envEndpoint(buildEngineConfig(nil))
-		require.NoError(t, err)
+		eng, err := envEndpoint(t.Context(), buildEngineConfig(nil))
+		if err != nil {
+			assert.ErrorIs(t, err, ErrDaemonInfo)
+			return
+		}
 		require.NotNil(t, eng)
 		t.Cleanup(func() {
 			if closeErr := eng.Close(); closeErr != nil {
@@ -419,7 +439,7 @@ func TestEnvEndpoint(t *testing.T) {
 		clearDockerEnv(t)
 		t.Setenv("DOCKER_HOST", "unix:///tmp/fake.sock")
 		t.Setenv("DOCKER_CONTEXT", "my-ctx")
-		_, err := envEndpoint(buildEngineConfig(nil))
+		_, err := envEndpoint(t.Context(), buildEngineConfig(nil))
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrInvalidSpec)
 	})
@@ -430,8 +450,11 @@ func TestEnvEndpoint(t *testing.T) {
 		writeContextMeta(t, dir, "my-ctx", "unix:///tmp/ctx.sock")
 		t.Setenv("DOCKER_CONTEXT", "my-ctx")
 		t.Setenv("DOCKER_CONFIG", dir)
-		eng, err := envEndpoint(buildEngineConfig(nil))
-		require.NoError(t, err)
+		eng, err := envEndpoint(t.Context(), buildEngineConfig(nil))
+		if err != nil {
+			assert.ErrorIs(t, err, ErrDaemonInfo)
+			return
+		}
 		require.NotNil(t, eng)
 		t.Cleanup(func() {
 			if closeErr := eng.Close(); closeErr != nil {
@@ -445,7 +468,7 @@ func TestEnvEndpoint(t *testing.T) {
 		clearDockerEnv(t)
 		t.Setenv("DOCKER_CONTEXT", "nonexistent")
 		t.Setenv("DOCKER_CONFIG", t.TempDir())
-		_, err := envEndpoint(buildEngineConfig(nil))
+		_, err := envEndpoint(t.Context(), buildEngineConfig(nil))
 		require.Error(t, err)
 	})
 
@@ -455,8 +478,11 @@ func TestEnvEndpoint(t *testing.T) {
 		writeDockerConfigInDir(t, dir, `{"currentContext":"lima-docker"}`)
 		writeContextMeta(t, dir, "lima-docker", "unix:///tmp/lima.sock")
 		t.Setenv("DOCKER_CONFIG", dir)
-		eng, err := envEndpoint(buildEngineConfig(nil))
-		require.NoError(t, err)
+		eng, err := envEndpoint(t.Context(), buildEngineConfig(nil))
+		if err != nil {
+			assert.ErrorIs(t, err, ErrDaemonInfo)
+			return
+		}
 		require.NotNil(t, eng)
 		t.Cleanup(func() {
 			if closeErr := eng.Close(); closeErr != nil {
@@ -470,7 +496,7 @@ func TestEnvEndpoint(t *testing.T) {
 		clearDockerEnv(t)
 		dir := writeDockerConfig(t, `{"currentContext":"default"}`)
 		t.Setenv("DOCKER_CONFIG", dir)
-		eng, err := envEndpoint(buildEngineConfig(nil))
+		eng, err := envEndpoint(t.Context(), buildEngineConfig(nil))
 		require.NoError(t, err)
 		assert.Nil(t, eng)
 	})
@@ -481,7 +507,7 @@ func TestEnvEndpoint(t *testing.T) {
 		writeDockerConfigInDir(t, dir, `{"currentContext":"broken-ctx"}`)
 		writeRawContextMetaInDir(t, dir, "broken-ctx", []byte("not-json"))
 		t.Setenv("DOCKER_CONFIG", dir)
-		_, err := envEndpoint(buildEngineConfig(nil))
+		_, err := envEndpoint(t.Context(), buildEngineConfig(nil))
 		require.Error(t, err)
 	})
 
@@ -494,19 +520,23 @@ func TestEnvEndpoint(t *testing.T) {
 		// The fake PEM data is not valid; tlsConfigFromCurrus rejects it with
 		// ErrInvalidSpec. That error proves TLS env vars were read and the
 		// cert files were loaded (file-not-found would surface differently).
-		_, err := envEndpoint(buildEngineConfig(nil))
+		_, err := envEndpoint(t.Context(), buildEngineConfig(nil))
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrInvalidSpec)
 	})
 }
 
-// TestNewViaDOCKER_HOST verifies that New() picks up DOCKER_HOST and returns
-// a Docker engine. The moby client is lazy so no daemon is required.
+// TestNewViaDOCKER_HOST verifies that New() picks up DOCKER_HOST.
+// This test is daemon-adaptive: when no daemon listens at the fake socket,
+// resolveInfo fails with ErrDaemonInfo.
 func TestNewViaDOCKER_HOST(t *testing.T) {
 	clearDockerEnv(t)
 	t.Setenv("DOCKER_HOST", "unix:///tmp/fake-docker.sock")
 	eng, err := New(t.Context())
-	require.NoError(t, err)
+	if err != nil {
+		assert.ErrorIs(t, err, ErrDaemonInfo)
+		return
+	}
 	t.Cleanup(func() {
 		if closeErr := eng.Close(); closeErr != nil {
 			t.Logf("close engine: %v", closeErr)
@@ -515,13 +545,17 @@ func TestNewViaDOCKER_HOST(t *testing.T) {
 	assert.Equal(t, Docker, eng.Kind())
 }
 
-// TestNewViaCONTAINER_HOST verifies that New() picks up CONTAINER_HOST and
-// returns a Podman engine.
+// TestNewViaCONTAINER_HOST verifies that New() picks up CONTAINER_HOST.
+// This test is daemon-adaptive: when no daemon listens at the fake socket,
+// resolveInfo fails with ErrDaemonInfo.
 func TestNewViaCONTAINER_HOST(t *testing.T) {
 	clearDockerEnv(t)
 	t.Setenv("CONTAINER_HOST", "unix:///tmp/fake-podman.sock")
 	eng, err := New(t.Context())
-	require.NoError(t, err)
+	if err != nil {
+		assert.ErrorIs(t, err, ErrDaemonInfo)
+		return
+	}
 	t.Cleanup(func() {
 		if closeErr := eng.Close(); closeErr != nil {
 			t.Logf("close engine: %v", closeErr)

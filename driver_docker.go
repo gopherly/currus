@@ -24,6 +24,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -143,7 +144,7 @@ func newDockerEngine(cfg dockerConfig) (*dockerEngine, error) {
 	return &dockerEngine{
 		cli:          cli,
 		kind:         kind,
-		caps:         buildDockerCaps(cfg.Kind),
+		caps:         Caps{},
 		host:         host,
 		daemonSocket: cfg.DaemonSocket,
 		logger:       lg,
@@ -151,13 +152,25 @@ func newDockerEngine(cfg dockerConfig) (*dockerEngine, error) {
 	}, nil
 }
 
-func buildDockerCaps(kind dockerDriverKind) Caps {
-	caps := Caps{}
-	if kind == dockerKindPodman {
-		caps.RootlessCapable = true
+// resolveInfo queries the daemon for system information and populates the
+// engine's Caps. It must be called after construction and before the engine
+// is returned to callers.
+func (e *dockerEngine) resolveInfo(ctx context.Context) error {
+	result, err := e.cli.Info(ctx, client.InfoOptions{})
+	if err != nil {
+		return fmt.Errorf("docker: %w: %w", ErrDaemonInfo, err)
 	}
+	e.caps.Rootless = isRootless(result.Info.SecurityOptions)
+	e.logger.DebugContext(ctx, "daemon info resolved", "rootless", e.caps.Rootless)
 
-	return caps
+	return nil
+}
+
+// isRootless reports whether the daemon SecurityOptions indicate rootless mode.
+// Docker and Podman both emit "name=rootless" when running without root
+// privileges.
+func isRootless(securityOptions []string) bool {
+	return slices.Contains(securityOptions, "name=rootless")
 }
 
 // Kind returns the backend kind.

@@ -44,4 +44,8 @@ var (
 	// ErrInvalidSpec is returned when a ContainerSpec or option field is
 	// malformed or missing a required value (e.g. an empty Image field).
 	ErrInvalidSpec = errors.New("invalid container spec")
+
+	// ErrDaemonInfo is returned when querying the daemon for system
+	// information fails during engine initialization.
+	ErrDaemonInfo = errors.New("daemon info query failed")
 )

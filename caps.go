@@ -20,17 +20,20 @@ import (
 	"time"
 )
 
-// Caps holds informational, non-method-shaped engine traits.
+// Caps holds non-method-shaped engine traits, some of which are detected
+// at engine initialization time by querying the daemon.
 //
 // Caps never mirrors a capability interface: method-shaped features
 // (e.g. ContainerLogs) are discovered by type assertion against the
 // capability interfaces (Logger, Execer, …). Caps holds only boolean or
 // string descriptors of structural engine properties.
 type Caps struct {
-	RootlessCapable bool
-	SupportsPods    bool
-	OneShotRun      bool
-	NamespaceModel  string
+	// Rootless is true when the daemon is running without root privileges.
+	// For Docker and Podman this is detected via docker/podman info at
+	// engine initialization time. For containerd it is inferred from the
+	// socket path (rootless containerd uses a socket under XDG_RUNTIME_DIR).
+	Rootless       bool
+	NamespaceModel string
 }
 
 // Logger is the capability interface for reading container log streams.

@@ -58,10 +58,10 @@ func New(ctx context.Context, opts ...Option) (Engine, error) {
 	cfg := buildEngineConfig(opts)
 
 	if cfg.kind != "" {
-		return openKind(cfg.kind, cfg)
+		return openKind(ctx, cfg.kind, cfg)
 	}
 
-	if eng, err := envEndpoint(cfg); eng != nil || err != nil {
+	if eng, err := envEndpoint(ctx, cfg); eng != nil || err != nil {
 		if err != nil {
 			return nil, err
 		}
@@ -70,7 +70,7 @@ func New(ctx context.Context, opts ...Option) (Engine, error) {
 	}
 
 	if envKind := engineKindFromEnv(); envKind != "" {
-		return openKind(envKind, cfg)
+		return openKind(ctx, envKind, cfg)
 	}
 
 	return autoDetect(ctx, cfg)
@@ -107,7 +107,8 @@ func buildEngineConfig(opts []Option) engineConfig {
 }
 
 // openKind constructs the engine for the given kind using the provided config.
-func openKind(kind EngineKind, cfg engineConfig) (Engine, error) {
+// For Docker and Podman engines, it also calls resolveInfo to populate Caps.
+func openKind(ctx context.Context, kind EngineKind, cfg engineConfig) (Engine, error) {
 	switch kind {
 	case Docker:
 		host := ""
@@ -119,7 +120,7 @@ func openKind(kind EngineKind, cfg engineConfig) (Engine, error) {
 			return nil, fmt.Errorf("currus: Docker TLS config: %w", err)
 		}
 
-		return newDockerEngine(dockerConfig{
+		eng, err := newDockerEngine(dockerConfig{
 			Host:         host,
 			DaemonSocket: resolveDaemonSocket(host, cfg.daemonSocket),
 			Kind:         dockerKindDocker,
@@ -127,6 +128,15 @@ func openKind(kind EngineKind, cfg engineConfig) (Engine, error) {
 			Logger:       cfg.logger,
 			Tracer:       cfg.tracer,
 		})
+		if err != nil {
+			return nil, err
+		}
+		if err = eng.resolveInfo(ctx); err != nil {
+			_ = eng.Close() //nolint:errcheck // best-effort close on failed init
+			return nil, err
+		}
+
+		return eng, nil
 	case Podman:
 		host := ""
 		if cfg.endpoint != nil {
@@ -137,7 +147,7 @@ func openKind(kind EngineKind, cfg engineConfig) (Engine, error) {
 			return nil, fmt.Errorf("currus: Podman TLS config: %w", err)
 		}
 
-		return newDockerEngine(dockerConfig{
+		eng, err := newDockerEngine(dockerConfig{
 			Host:         host,
 			DaemonSocket: resolveDaemonSocket(host, cfg.daemonSocket),
 			Kind:         dockerKindPodman,
@@ -145,6 +155,15 @@ func openKind(kind EngineKind, cfg engineConfig) (Engine, error) {
 			Logger:       cfg.logger,
 			Tracer:       cfg.tracer,
 		})
+		if err != nil {
+			return nil, err
+		}
+		if err = eng.resolveInfo(ctx); err != nil {
+			_ = eng.Close() //nolint:errcheck // best-effort close on failed init
+			return nil, err
+		}
+
+		return eng, nil
 	case Containerd:
 		socket := ""
 		ns := ""
@@ -228,6 +247,15 @@ func autoDetect(ctx context.Context, cfg engineConfig) (Engine, error) {
 
 			continue
 		}
+		if dEng, ok := eng.(*dockerEngine); ok {
+			if err = dEng.resolveInfo(ctx); err != nil {
+				cfg.logger.DebugContext(ctx, "engine candidate skipped (info failed)",
+					"kind", c.kind, "socket", c.socket, "err", err)
+				_ = eng.Close() //nolint:errcheck // best-effort close on failed candidate
+
+				continue
+			}
+		}
 		cfg.logger.DebugContext(ctx, "engine detected",
 			"kind", c.kind, "socket", c.socket)
 
@@ -283,6 +311,22 @@ func dockerDesktopSocket() string {
 	return home + "/.docker/run/docker.sock"
 }
 
+// buildAndResolveDockerEngine creates a dockerEngine from dcfg and immediately
+// calls resolveInfo to populate Caps. On any error the engine is closed and
+// the error is returned.
+func buildAndResolveDockerEngine(ctx context.Context, dcfg dockerConfig) (*dockerEngine, error) {
+	eng, err := newDockerEngine(dcfg)
+	if err != nil {
+		return nil, err
+	}
+	if err = eng.resolveInfo(ctx); err != nil {
+		_ = eng.Close() //nolint:errcheck // best-effort close on failed init
+		return nil, err
+	}
+
+	return eng, nil
+}
+
 // envEndpoint resolves an Engine from Docker and Podman environment variables
 // and the active Docker context. It returns (nil, nil) when no relevant
 // variable is set, signaling New to continue to the next detection step.
@@ -292,7 +336,7 @@ func dockerDesktopSocket() string {
 //  2. CONTAINER_HOST (Podman)
 //  3. DOCKER_CONTEXT (Docker context by name)
 //  4. Active context from ~/.docker/config.json
-func envEndpoint(cfg engineConfig) (Engine, error) {
+func envEndpoint(ctx context.Context, cfg engineConfig) (Engine, error) {
 	dockerHost := os.Getenv("DOCKER_HOST")
 	dockerContext := os.Getenv("DOCKER_CONTEXT")
 
@@ -301,28 +345,11 @@ func envEndpoint(cfg engineConfig) (Engine, error) {
 	}
 
 	if dockerHost != "" {
-		currusTLS, err := dockerTLSFromEnv()
-		if err != nil {
-			return nil, fmt.Errorf("currus: DOCKER_HOST TLS: %w", err)
-		}
-
-		tlsCfg, err := tlsConfigFromCurrus(currusTLS)
-		if err != nil {
-			return nil, fmt.Errorf("currus: DOCKER_HOST TLS: %w", err)
-		}
-
-		return newDockerEngine(dockerConfig{
-			Host:         dockerHost,
-			DaemonSocket: resolveDaemonSocket(dockerHost, cfg.daemonSocket),
-			Kind:         dockerKindDocker,
-			TLS:          tlsCfg,
-			Logger:       cfg.logger,
-			Tracer:       cfg.tracer,
-		})
+		return envEndpointDockerHost(ctx, dockerHost, cfg)
 	}
 
 	if containerHost := os.Getenv("CONTAINER_HOST"); containerHost != "" {
-		return newDockerEngine(dockerConfig{
+		return buildAndResolveDockerEngine(ctx, dockerConfig{
 			Host:         containerHost,
 			DaemonSocket: resolveDaemonSocket(containerHost, cfg.daemonSocket),
 			Kind:         dockerKindPodman,
@@ -331,6 +358,35 @@ func envEndpoint(cfg engineConfig) (Engine, error) {
 		})
 	}
 
+	return envEndpointContext(ctx, dockerContext, cfg)
+}
+
+// envEndpointDockerHost resolves an engine from the DOCKER_HOST environment
+// variable, reading TLS configuration from DOCKER_TLS_VERIFY / DOCKER_CERT_PATH.
+func envEndpointDockerHost(ctx context.Context, dockerHost string, cfg engineConfig) (Engine, error) {
+	currusTLS, err := dockerTLSFromEnv()
+	if err != nil {
+		return nil, fmt.Errorf("currus: DOCKER_HOST TLS: %w", err)
+	}
+
+	tlsCfg, err := tlsConfigFromCurrus(currusTLS)
+	if err != nil {
+		return nil, fmt.Errorf("currus: DOCKER_HOST TLS: %w", err)
+	}
+
+	return buildAndResolveDockerEngine(ctx, dockerConfig{
+		Host:         dockerHost,
+		DaemonSocket: resolveDaemonSocket(dockerHost, cfg.daemonSocket),
+		Kind:         dockerKindDocker,
+		TLS:          tlsCfg,
+		Logger:       cfg.logger,
+		Tracer:       cfg.tracer,
+	})
+}
+
+// envEndpointContext resolves an engine from the active Docker context,
+// consulting DOCKER_CONTEXT first and then ~/.docker/config.json.
+func envEndpointContext(ctx context.Context, dockerContext string, cfg engineConfig) (Engine, error) {
 	configDir := dockerConfigDir()
 
 	if dockerContext != "" {
@@ -339,7 +395,7 @@ func envEndpoint(cfg engineConfig) (Engine, error) {
 			return nil, fmt.Errorf("currus: DOCKER_CONTEXT %q: %w", dockerContext, err)
 		}
 
-		return newDockerEngine(dockerConfig{
+		return buildAndResolveDockerEngine(ctx, dockerConfig{
 			Host:         host,
 			DaemonSocket: resolveDaemonSocket(host, cfg.daemonSocket),
 			Kind:         dockerKindDocker,
@@ -354,7 +410,7 @@ func envEndpoint(cfg engineConfig) (Engine, error) {
 			return nil, fmt.Errorf("currus: active Docker context %q: %w", name, err)
 		}
 
-		return newDockerEngine(dockerConfig{
+		return buildAndResolveDockerEngine(ctx, dockerConfig{
 			Host:         host,
 			DaemonSocket: resolveDaemonSocket(host, cfg.daemonSocket),
 			Kind:         dockerKindDocker,

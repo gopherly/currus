@@ -41,9 +41,34 @@ import (
 	"gopherly.dev/currus"
 )
 
+// FakeOption is a functional option for [New].
+type FakeOption func(*Fake)
+
+// WithKind sets the engine kind reported by [Fake.Kind].
+// Defaults to "fake" when not set.
+func WithKind(k currus.EngineKind) FakeOption {
+	return func(f *Fake) { f.kind = k }
+}
+
+// WithCaps sets the capabilities reported by [Fake.Capabilities].
+// Defaults to zero-value [currus.Caps] when not set.
+func WithCaps(c currus.Caps) FakeOption {
+	return func(f *Fake) { f.caps = c }
+}
+
+// WithEndpoint sets the endpoint reported by [Fake.Endpoint].
+// Defaults to a synthetic unix socket endpoint when not set.
+func WithEndpoint(ep currus.Endpoint) FakeOption {
+	return func(f *Fake) { f.endpoint = ep }
+}
+
 // Fake is the in-memory fake engine. It is safe for concurrent use.
 type Fake struct {
-	mu         sync.RWMutex
+	mu       sync.RWMutex
+	kind     currus.EngineKind
+	caps     currus.Caps
+	endpoint currus.Endpoint
+
 	containers map[currus.ContainerID]*fakeContainer
 	images     map[string]bool
 	networks   map[currus.NetworkID]currus.Network
@@ -76,24 +101,36 @@ var (
 )
 
 // New returns a ready-to-use in-memory fake engine.
-func New() *Fake {
-	return &Fake{
+// Pass [FakeOption] values to customize the fake's kind, capabilities,
+// or endpoint.
+func New(opts ...FakeOption) *Fake {
+	f := &Fake{
+		kind: currus.EngineKind("fake"),
+		endpoint: currus.Endpoint{
+			Host:         "unix:///var/run/fake.sock",
+			DaemonSocket: "/var/run/fake.sock",
+		},
 		containers: make(map[currus.ContainerID]*fakeContainer),
 		images:     make(map[string]bool),
 		networks:   make(map[currus.NetworkID]currus.Network),
 		netMembers: make(map[currus.NetworkID]map[currus.ContainerID]struct{}),
 		volumes:    make(map[currus.VolumeID]currus.Volume),
 	}
+	for _, o := range opts {
+		o(f)
+	}
+
+	return f
 }
 
-// Kind returns the fake's engine kind.
+// Kind returns the engine kind set by [WithKind], defaulting to "fake".
 func (e *Fake) Kind() currus.EngineKind {
-	return currus.EngineKind("fake")
+	return e.kind
 }
 
-// Capabilities returns zero-value Caps (fake supports nothing non-trivial).
+// Capabilities returns the Caps set by [WithCaps], defaulting to zero-value.
 func (e *Fake) Capabilities() currus.Caps {
-	return currus.Caps{}
+	return e.caps
 }
 
 // Ping always succeeds.
@@ -427,12 +464,10 @@ func (e *Fake) DisconnectContainer(_ context.Context, net currus.NetworkID, id c
 }
 
 // Endpoint implements currus.EndpointReporter.
-// Returns a synthetic endpoint suitable for tests.
+// Returns the endpoint set by [WithEndpoint], defaulting to a synthetic
+// unix socket.
 func (e *Fake) Endpoint() currus.Endpoint {
-	return currus.Endpoint{
-		Host:         "unix:///var/run/fake.sock",
-		DaemonSocket: "/var/run/fake.sock",
-	}
+	return e.endpoint
 }
 
 // NetworkMembers returns the set of container IDs currently attached to net.

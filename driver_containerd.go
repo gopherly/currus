@@ -33,6 +33,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"syscall"
 	"time"
@@ -79,6 +80,7 @@ type containerdConfig struct {
 type containerdEngine struct {
 	cli          *containerd.Client
 	namespace    string
+	caps         Caps
 	socket       string // resolved socket path, e.g. "/run/containerd/containerd.sock"
 	daemonSocket string // bind-mountable socket path inside the daemon's filesystem
 	logger       *slog.Logger
@@ -118,11 +120,20 @@ func newContainerdEngine(cfg containerdConfig) (*containerdEngine, error) {
 	return &containerdEngine{
 		cli:          cli,
 		namespace:    ns,
+		caps:         Caps{Rootless: isRootlessSocket(socket), NamespaceModel: "containerd"},
 		socket:       socket,
 		daemonSocket: cfg.DaemonSocket,
 		logger:       lg,
 		tracer:       cfg.Tracer,
 	}, nil
+}
+
+// isRootlessSocket reports whether the socket path is under the user's
+// XDG_RUNTIME_DIR, which is the convention for rootless containerd
+// installations.
+func isRootlessSocket(socket string) bool {
+	xdg := os.Getenv("XDG_RUNTIME_DIR")
+	return xdg != "" && strings.HasPrefix(socket, xdg+"/")
 }
 
 // ctrdCtx returns a context decorated with the configured containerd namespace.
@@ -136,12 +147,8 @@ func (e *containerdEngine) Kind() EngineKind {
 }
 
 // Capabilities returns the non-method-shaped traits of this driver.
-// OneShotRun is false (containerd uses create+task+start); NamespaceModel is
-// "containerd".
 func (e *containerdEngine) Capabilities() Caps {
-	return Caps{
-		NamespaceModel: "containerd",
-	}
+	return e.caps
 }
 
 // Ping verifies the containerd daemon is reachable.

@@ -36,6 +36,70 @@ func TestFakeEngine(t *testing.T) {
 	assert.NoError(t, eng.Close())
 }
 
+// TestFakeOptions verifies that WithKind, WithCaps, and WithEndpoint
+// functional options override the fake's defaults correctly.
+func TestFakeOptions(t *testing.T) {
+	t.Parallel()
+
+	t.Run("WithKind overrides default kind", func(t *testing.T) {
+		t.Parallel()
+		eng := currustest.New(currustest.WithKind(currus.Docker))
+		assert.Equal(t, currus.Docker, eng.Kind())
+	})
+
+	t.Run("WithCaps sets rootless", func(t *testing.T) {
+		t.Parallel()
+		eng := currustest.New(currustest.WithCaps(currus.Caps{Rootless: true}))
+		assert.True(t, eng.Capabilities().Rootless)
+	})
+
+	t.Run("WithCaps sets namespace model", func(t *testing.T) {
+		t.Parallel()
+		eng := currustest.New(currustest.WithCaps(currus.Caps{NamespaceModel: "containerd"}))
+		assert.Equal(t, "containerd", eng.Capabilities().NamespaceModel)
+	})
+
+	t.Run("WithEndpoint overrides default endpoint", func(t *testing.T) {
+		t.Parallel()
+		custom := currus.Endpoint{
+			Host:         "unix:///custom/docker.sock",
+			DaemonSocket: "/custom/docker.sock",
+		}
+		eng := currustest.New(currustest.WithEndpoint(custom))
+		assert.Equal(t, custom, eng.Endpoint())
+	})
+
+	t.Run("options compose", func(t *testing.T) {
+		t.Parallel()
+		eng := currustest.New(
+			currustest.WithKind(currus.Docker),
+			currustest.WithCaps(currus.Caps{Rootless: true}),
+		)
+		assert.Equal(t, currus.Docker, eng.Kind())
+		assert.True(t, eng.Capabilities().Rootless)
+	})
+
+	t.Run("default kind is fake", func(t *testing.T) {
+		t.Parallel()
+		eng := currustest.New()
+		assert.Equal(t, currus.EngineKind("fake"), eng.Kind())
+	})
+
+	t.Run("default caps are zero", func(t *testing.T) {
+		t.Parallel()
+		eng := currustest.New()
+		assert.Equal(t, currus.Caps{}, eng.Capabilities())
+	})
+
+	t.Run("default endpoint is synthetic unix socket", func(t *testing.T) {
+		t.Parallel()
+		eng := currustest.New()
+		ep := eng.Endpoint()
+		assert.Equal(t, "unix:///var/run/fake.sock", ep.Host)
+		assert.Equal(t, "/var/run/fake.sock", ep.DaemonSocket)
+	})
+}
+
 // TestFakeSetLogs also verifies that calling SetLogs for an unknown container
 // is a no-op rather than an error.
 func TestFakeSetLogs(t *testing.T) {
