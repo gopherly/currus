@@ -16,9 +16,9 @@
 // tests. [Fake] implements currus.Engine plus all capability interfaces
 // ([currus.Logger], [currus.Execer], [currus.Inspector], [currus.Stater],
 // [currus.Waiter], [currus.Eventer], [currus.Imager], [currus.Networker],
-// [currus.Volumer], [currus.Copier], [currus.EndpointReporter]) so that
-// callers can test code paths that branch on optional features without
-// running a real container daemon.
+// [currus.Volumer], [currus.Copier], [currus.EndpointReporter],
+// [currus.CredentialProvider]) so that callers can test code paths that branch
+// on optional features without running a real container daemon.
 //
 // The fake is also the primary target of the conformance suite in
 // [gopherly.dev/currus/conformance]; keeping the fake conformant prevents it
@@ -36,6 +36,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -65,12 +66,19 @@ func WithEndpoint(ep currus.Endpoint) FakeOption {
 	return func(f *Fake) { f.endpoint = ep }
 }
 
+// WithCredentials sets the credentials returned by [Fake.Credentials].
+// When not set, Credentials returns an empty map and nil error.
+func WithCredentials(creds map[string]currus.AuthEntry) FakeOption {
+	return func(f *Fake) { f.creds = creds }
+}
+
 // Fake is the in-memory fake engine. It is safe for concurrent use.
 type Fake struct {
 	mu       sync.RWMutex
 	kind     currus.EngineKind
 	caps     currus.Caps
 	endpoint currus.Endpoint
+	creds    map[string]currus.AuthEntry
 
 	containers map[currus.ContainerID]*fakeContainer
 	images     map[string]bool
@@ -99,18 +107,19 @@ type fakeContainer struct {
 
 // Compile-time assertions.
 var (
-	_ currus.Engine           = (*Fake)(nil)
-	_ currus.Logger           = (*Fake)(nil)
-	_ currus.Execer           = (*Fake)(nil)
-	_ currus.Inspector        = (*Fake)(nil)
-	_ currus.Stater           = (*Fake)(nil)
-	_ currus.Waiter           = (*Fake)(nil)
-	_ currus.Eventer          = (*Fake)(nil)
-	_ currus.Imager           = (*Fake)(nil)
-	_ currus.Networker        = (*Fake)(nil)
-	_ currus.Volumer          = (*Fake)(nil)
-	_ currus.Copier           = (*Fake)(nil)
-	_ currus.EndpointReporter = (*Fake)(nil)
+	_ currus.Engine             = (*Fake)(nil)
+	_ currus.Logger             = (*Fake)(nil)
+	_ currus.Execer             = (*Fake)(nil)
+	_ currus.Inspector          = (*Fake)(nil)
+	_ currus.Stater             = (*Fake)(nil)
+	_ currus.Waiter             = (*Fake)(nil)
+	_ currus.Eventer            = (*Fake)(nil)
+	_ currus.Imager             = (*Fake)(nil)
+	_ currus.Networker          = (*Fake)(nil)
+	_ currus.Volumer            = (*Fake)(nil)
+	_ currus.Copier             = (*Fake)(nil)
+	_ currus.EndpointReporter   = (*Fake)(nil)
+	_ currus.CredentialProvider = (*Fake)(nil)
 )
 
 // New returns a ready-to-use in-memory fake engine.
@@ -633,4 +642,20 @@ func resolveEphemeralPorts(specPorts []currus.Port, counter *atomic.Uint64) []cu
 	})
 
 	return out
+}
+
+// Credentials implements [currus.CredentialProvider]. It returns the map
+// configured by [WithCredentials], or an empty map if none was set.
+func (e *Fake) Credentials(_ context.Context) (map[string]currus.AuthEntry, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	if e.creds == nil {
+		return map[string]currus.AuthEntry{}, nil
+	}
+	// Return a shallow copy so callers cannot mutate the fake's internal state.
+	out := make(map[string]currus.AuthEntry, len(e.creds))
+	maps.Copy(out, e.creds)
+
+	return out, nil
 }

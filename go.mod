@@ -3,6 +3,7 @@ module gopherly.dev/currus
 go 1.26.3
 
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/containerd/containerd/v2 v2.3.1
 	github.com/containerd/errdefs v1.0.0
 	github.com/containerd/platforms v1.0.0-rc.4

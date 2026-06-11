@@ -95,18 +95,19 @@ type dockerEngine struct {
 
 // Compile-time assertions.
 var (
-	_ Engine           = (*dockerEngine)(nil)
-	_ Logger           = (*dockerEngine)(nil)
-	_ Execer           = (*dockerEngine)(nil)
-	_ Inspector        = (*dockerEngine)(nil)
-	_ Stater           = (*dockerEngine)(nil)
-	_ Waiter           = (*dockerEngine)(nil)
-	_ Eventer          = (*dockerEngine)(nil)
-	_ Imager           = (*dockerEngine)(nil)
-	_ Networker        = (*dockerEngine)(nil)
-	_ Volumer          = (*dockerEngine)(nil)
-	_ Copier           = (*dockerEngine)(nil)
-	_ EndpointReporter = (*dockerEngine)(nil)
+	_ Engine             = (*dockerEngine)(nil)
+	_ Logger             = (*dockerEngine)(nil)
+	_ Execer             = (*dockerEngine)(nil)
+	_ Inspector          = (*dockerEngine)(nil)
+	_ Stater             = (*dockerEngine)(nil)
+	_ Waiter             = (*dockerEngine)(nil)
+	_ Eventer            = (*dockerEngine)(nil)
+	_ Imager             = (*dockerEngine)(nil)
+	_ Networker          = (*dockerEngine)(nil)
+	_ Volumer            = (*dockerEngine)(nil)
+	_ Copier             = (*dockerEngine)(nil)
+	_ EndpointReporter   = (*dockerEngine)(nil)
+	_ CredentialProvider = (*dockerEngine)(nil)
 )
 
 // newDockerEngine creates a dockerEngine using the given dockerConfig.
@@ -1082,4 +1083,28 @@ func dockerDNSToStrings(addrs []netip.Addr) []string {
 	}
 
 	return out
+}
+
+// Credentials implements [CredentialProvider]. It resolves all stored registry
+// credentials using the Docker or Podman credential chain depending on which
+// daemon this engine is connected to.
+//
+// For Docker: reads ~/.docker/config.json (or $DOCKER_CONFIG/config.json),
+// executes credsStore / credHelpers binaries, and returns inline auth entries.
+//
+// For Podman: merges the cascading auth file chain
+// ($XDG_RUNTIME_DIR/containers/auth.json → $XDG_CONFIG_HOME/containers/auth.json →
+// ~/.docker/config.json → ~/.dockercfg), consults registries.conf for global
+// credential helpers, and returns all resolvable entries.
+//
+// Credential helper binaries that are not on PATH are silently skipped
+// (partial success). Only a failure to read the primary config file returns
+// an error.
+func (e *dockerEngine) Credentials(ctx context.Context) (map[string]AuthEntry, error) {
+	env := snapshotCredEnv()
+	if e.kind == Podman {
+		return resolvePodmanCredentials(ctx, e.logger, env)
+	}
+
+	return resolveDockerCredentials(ctx, e.logger, env)
 }

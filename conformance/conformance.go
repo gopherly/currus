@@ -26,8 +26,8 @@
 // Driver maintainers call [Run] with a factory function that returns an
 // [currus.Engine] for each sub-test. Engines that implement optional
 // capability interfaces ([currus.Logger], [currus.Execer], [currus.Inspector],
-// [currus.Stater], [currus.Waiter], [currus.Eventer]) are tested for those
-// as well.
+// [currus.Stater], [currus.Waiter], [currus.Eventer],
+// [currus.CredentialProvider]) are tested for those as well.
 //
 // Usage (unit layer, no daemon):
 //
@@ -657,6 +657,23 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine, opts ...RunOp
 		ep := er.Endpoint()
 		assert.NotEmptyf(t, ep.Host, "EndpointReporter.Endpoint().Host must not be empty")
 		t.Logf("endpoint: host=%q namespace=%q", ep.Host, ep.Namespace)
+	})
+
+	t.Run("CredentialProviderCapability", func(t *testing.T) {
+		t.Parallel()
+		eng := newEngine(t)
+
+		cp, ok := eng.(currus.CredentialProvider)
+		if !ok {
+			t.Skip("engine does not implement currus.CredentialProvider; skipping credential tests")
+		}
+
+		// Credentials must return a non-nil map and a nil error. An empty map is
+		// valid (no credentials configured). The test does not validate the
+		// contents because credential files differ per environment.
+		creds, err := cp.Credentials(t.Context())
+		require.NoError(t, err)
+		assert.NotNilf(t, creds, "CredentialProvider.Credentials must return a non-nil map")
 	})
 
 	t.Run("SecurityAndDNS", func(t *testing.T) {
