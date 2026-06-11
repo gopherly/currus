@@ -112,6 +112,24 @@ func TestDockerConvertPorts(t *testing.T) {
 		require.Len(t, bindings, 1)
 		assert.Equal(t, "9090", bindings[0].HostPort)
 	})
+
+	t.Run("HostIP is passed to binding", func(t *testing.T) {
+		t.Parallel()
+		pm, err := dockerConvertPorts([]Port{{Container: 8080, Host: 9090, HostIP: "127.0.0.1"}})
+		require.NoError(t, err)
+		key, err := network.ParsePort("8080/tcp")
+		require.NoError(t, err)
+		bindings := pm[key]
+		require.Len(t, bindings, 1)
+		assert.Equal(t, "127.0.0.1", bindings[0].HostIP.String())
+	})
+
+	t.Run("invalid HostIP returns ErrInvalidSpec", func(t *testing.T) {
+		t.Parallel()
+		_, err := dockerConvertPorts([]Port{{Container: 8080, HostIP: "not-an-ip"}})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidSpec)
+	})
 }
 
 // TestDockerConvertRestartPolicy verifies that dockerConvertRestartPolicy

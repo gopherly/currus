@@ -111,11 +111,19 @@ type Mount struct {
 }
 
 // Port describes a single port binding between container and host.
+//
+// On the input side (ContainerSpec), HostIP constrains which host interface to
+// bind (e.g. "127.0.0.1" for loopback-only). On the output side (ContainerInfo),
+// HostIP reports the interface the engine actually bound.
 type Port struct {
 	// Container is the port number exposed by the container.
 	Container uint16
 	// Host is the host port to bind to. Zero lets the engine pick a free port.
+	// When returned by Inspect, Host is always the actual bound port.
 	Host uint16
+	// HostIP is the host interface to bind to (e.g. "127.0.0.1", "0.0.0.0").
+	// Empty means all interfaces.
+	HostIP string
 	// Protocol is the transport protocol ("tcp" or "udp"). Defaults to "tcp"
 	// when empty.
 	Protocol string

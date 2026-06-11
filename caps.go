@@ -226,21 +226,43 @@ type Inspector interface {
 
 // ContainerInfo holds the full details of a container as returned by Inspect.
 type ContainerInfo struct {
-	ID         ContainerID
-	Name       string
-	Image      string
-	ImageID    string
-	Labels     map[string]string
-	State      ContainerState
-	Command    []string
-	Env        []string
+	// ID is the engine-assigned container identifier.
+	ID ContainerID
+	// Name is the human-readable container name, without a leading slash.
+	Name string
+	// Image is the image reference the container was created from (e.g. "alpine:3.20").
+	Image string
+	// ImageID is the content-addressed image digest as reported by the engine.
+	ImageID string
+	// Labels are the key/value metadata attached to the container at creation time.
+	Labels map[string]string
+	// State is the current runtime state of the container.
+	State ContainerState
+	// Command is the effective process: the image entrypoint followed by any additional arguments.
+	Command []string
+	// Env holds the container's environment variables in KEY=VALUE form.
+	Env []string
+	// WorkingDir is the working directory for the container process.
 	WorkingDir string
-	Mounts     []Mount
-	Security   Security
-	DNS        DNS
-	Hostname   string
+	// Mounts lists the filesystem mounts attached to the container.
+	Mounts []Mount
+	// Security is the security posture the container is running under.
+	Security Security
+	// DNS is the DNS resolver configuration for the container.
+	DNS DNS
+	// Hostname is the container's hostname.
+	Hostname string
+	// ExtraHosts lists the custom host-to-IP mappings injected into /etc/hosts, in "host:ip" form.
 	ExtraHosts []string
-	Init       bool
+	// Init reports whether an init process is running as PID 1 for signal forwarding and zombie reaping.
+	Init bool
+	// Ports lists the published port bindings. When the container is running,
+	// Host reflects the actual assigned port number (including ephemeral ports
+	// picked by the engine). When the container is stopped, only bindings with
+	// an explicit host port are included; ephemeral bindings are omitted because
+	// the host port is not assigned until the container starts. Entries are sorted
+	// by container port, then protocol, then host port.
+	Ports []Port
 }
 
 // ContainerState holds the runtime state of an inspected container.

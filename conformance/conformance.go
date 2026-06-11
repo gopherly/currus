@@ -82,13 +82,25 @@ func isRegistryRateLimit(err error) bool {
 		strings.Contains(msg, "pull rate limit")
 }
 
+// RunOpts controls which conformance subtests are executed.
+type RunOpts struct {
+	// SkipPortMapping skips the published-ports inspector subtest. Set this
+	// for environments where host port mapping is not functional (e.g. DinD).
+	SkipPortMapping bool
+}
+
 // Run runs the full conformance suite against the engine returned by newEngine.
 // newEngine is called once per sub-test. If the engine needs cleanup, register
 // it with t.Cleanup inside newEngine.
 //
 //nolint:gocognit,cyclop // deliberate flat table of independent capability subtests; splitting would scatter the suite
-func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
+func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine, opts ...RunOpts) {
 	t.Helper()
+
+	var o RunOpts
+	if len(opts) > 0 {
+		o = opts[0]
+	}
 
 	// name builds a resource name that is unique to this Run invocation. A
 	// run-scoped suffix keeps parallel subtests from colliding and, crucially,
@@ -326,6 +338,67 @@ func Run(t *testing.T, newEngine func(t *testing.T) currus.Engine) {
 		_, err = ins.Inspect(ctx, currus.ContainerID("currus-nonexistent-inspect-99"))
 		assert.ErrorIsf(t, err, currus.ErrNotFound,
 			"inspect missing container: expected ErrNotFound")
+	})
+
+	t.Run("InspectorCapability/PublishedPorts", func(t *testing.T) {
+		if o.SkipPortMapping {
+			t.Skip("port mapping not supported in this environment (SkipPortMapping is set)")
+		}
+		t.Parallel()
+		eng := newEngine(t)
+
+		ins, ok := eng.(currus.Inspector)
+		if !ok {
+			t.Skip("engine does not implement currus.Inspector; skipping inspect tests")
+		}
+
+		ctx := t.Context()
+		_ = eng.PullImage(ctx, TestImage, currus.PullImageOpts{}) //nolint:errcheck // best-effort: image may already be present
+
+		id, err := eng.CreateContainer(ctx, currus.ContainerSpec{
+			Image:   TestImage,
+			Name:    name("inspect-ports"),
+			Command: []string{"sleep"},
+			Args:    []string{"999"},
+			Ports: []currus.Port{
+				{Container: 80},
+				{Container: 81},
+			},
+		})
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_ = eng.RemoveContainer(ctx, id, currus.RemoveContainerOpts{Force: true}) //nolint:errcheck // best-effort cleanup
+		})
+
+		require.NoError(t, eng.StartContainer(ctx, id))
+
+		info, err := ins.Inspect(ctx, id)
+		require.NoError(t, err)
+
+		require.NotEmptyf(t, info.Ports, "inspect returned no published ports")
+
+		hostsFor := func(ports []currus.Port, containerPort uint16) []uint16 {
+			var out []uint16
+			for _, p := range ports {
+				if p.Container == containerPort {
+					out = append(out, p.Host)
+				}
+			}
+
+			return out
+		}
+
+		h80 := hostsFor(info.Ports, 80)
+		assert.NotEmptyf(t, h80, "container port 80 should appear in Ports")
+		for _, h := range h80 {
+			assert.NotZerof(t, h, "host port for container 80 must be assigned")
+		}
+
+		h81 := hostsFor(info.Ports, 81)
+		assert.NotEmptyf(t, h81, "container port 81 should appear in Ports")
+		for _, h := range h81 {
+			assert.NotZerof(t, h, "host port for container 81 must be assigned")
+		}
 	})
 
 	t.Run("StaterCapability", func(t *testing.T) {

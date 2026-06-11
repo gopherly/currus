@@ -452,6 +452,59 @@ func TestFakeInspect(t *testing.T) {
 	})
 }
 
+// TestFakeInspectPorts verifies that Inspect returns the resolved port
+// bindings for a container, including ephemeral host port assignment when
+// Host==0 and preservation of an explicit host port.
+func TestFakeInspectPorts(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	eng := currustest.New()
+
+	id, err := eng.CreateContainer(ctx, currus.ContainerSpec{
+		Image: "nginx:latest",
+		Ports: []currus.Port{
+			{Container: 80},              // Host==0: expect assigned ephemeral port
+			{Container: 443, Host: 8443}, // explicit host port preserved
+			{Container: 53, Protocol: "udp", HostIP: "127.0.0.1"}, // explicit protocol + HostIP
+		},
+	})
+	require.NoError(t, err)
+
+	info, err := eng.Inspect(ctx, id)
+	require.NoError(t, err)
+	require.Len(t, info.Ports, 3)
+
+	// Ports are sorted by container port, then protocol, then host port.
+	// 53/udp < 80/tcp < 443/tcp
+	assert.Equal(t, uint16(53), info.Ports[0].Container)
+	assert.Equal(t, "udp", info.Ports[0].Protocol)
+	assert.Equal(t, "127.0.0.1", info.Ports[0].HostIP)
+	assert.NotZero(t, info.Ports[0].Host)
+
+	assert.Equal(t, uint16(80), info.Ports[1].Container)
+	assert.Equal(t, "tcp", info.Ports[1].Protocol)
+	assert.NotZerof(t, info.Ports[1].Host, "ephemeral port must be assigned")
+
+	assert.Equal(t, uint16(443), info.Ports[2].Container)
+	assert.Equal(t, "tcp", info.Ports[2].Protocol)
+	assert.Equal(t, uint16(8443), info.Ports[2].Host)
+}
+
+// TestFakeInspectPortsNone verifies that a container with no published ports
+// returns nil (not an empty slice) in ContainerInfo.Ports.
+func TestFakeInspectPortsNone(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	eng := currustest.New()
+
+	id, err := eng.CreateContainer(ctx, currus.ContainerSpec{Image: "alpine"})
+	require.NoError(t, err)
+
+	info, err := eng.Inspect(ctx, id)
+	require.NoError(t, err)
+	assert.Nil(t, info.Ports)
+}
+
 // TestFakeExec verifies that Exec echoes the cmd as stdout when AttachStdout
 // is true, and returns ErrNotFound for an unknown container.
 func TestFakeExec(t *testing.T) {

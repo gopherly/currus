@@ -80,7 +80,7 @@ func TestConformanceDinD(t *testing.T) {
 		})
 
 		return eng
-	})
+	}, conformance.RunOpts{SkipPortMapping: true})
 }
 
 // seedImageIntoDinD copies TestImage from the host daemon into the DinD daemon

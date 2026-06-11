@@ -553,8 +553,53 @@ func (e *dockerEngine) Inspect(ctx context.Context, id ContainerID) (ContainerIn
 			info.Init = true
 		}
 	}
+	info.Ports = dockerInspectPorts(c.NetworkSettings, c.HostConfig)
 
 	return info, nil
+}
+
+// dockerInspectPorts converts Docker port maps into a sorted []Port.
+//
+// When the container is running, NetworkSettings.Ports carries the actual
+// assigned host ports (including ephemeral ones). When it is empty or nil
+// (container stopped), the function falls back to HostConfig.PortBindings,
+// which holds the configured bindings; entries with an empty HostPort are
+// skipped because an ephemeral port has no known host port until the engine
+// assigns one at start time.
+func dockerInspectPorts(ns *container.NetworkSettings, hc *container.HostConfig) []Port {
+	var portMap network.PortMap
+	if ns != nil && len(ns.Ports) > 0 {
+		portMap = ns.Ports
+	} else if hc != nil {
+		portMap = hc.PortBindings
+	}
+	if len(portMap) == 0 {
+		return nil
+	}
+
+	var ports []Port
+	for natPort, bindings := range portMap {
+		proto := string(natPort.Proto())
+		for _, b := range bindings {
+			if b.HostPort == "" {
+				continue // ephemeral port not yet assigned
+			}
+			hostPort, _ := strconv.ParseUint(b.HostPort, 10, 16) //nolint:errcheck
+			hostIP := ""
+			if b.HostIP.IsValid() {
+				hostIP = b.HostIP.String()
+			}
+			ports = append(ports, Port{
+				Container: natPort.Num(),
+				Host:      uint16(hostPort),
+				HostIP:    hostIP,
+				Protocol:  proto,
+			})
+		}
+	}
+	slices.SortFunc(ports, cmpPort)
+
+	return ports
 }
 
 // Stats implements the Stater capability.
@@ -936,6 +981,13 @@ func dockerConvertPorts(ports []Port) (network.PortMap, error) {
 			return nil, fmt.Errorf("%w: port %d/%s: %w", ErrInvalidSpec, p.Container, proto, err)
 		}
 		binding := network.PortBinding{}
+		if p.HostIP != "" {
+			addr, parseErr := netip.ParseAddr(p.HostIP)
+			if parseErr != nil {
+				return nil, fmt.Errorf("%w: port %d/%s HostIP %q: %w", ErrInvalidSpec, p.Container, proto, p.HostIP, parseErr)
+			}
+			binding.HostIP = addr
+		}
 		if p.Host != 0 {
 			binding.HostPort = strconv.FormatUint(uint64(p.Host), 10)
 		}
@@ -943,6 +995,19 @@ func dockerConvertPorts(ports []Port) (network.PortMap, error) {
 	}
 
 	return pm, nil
+}
+
+// cmpPort is the sort key for []Port: container port, then protocol,
+// then host port. Used to give Inspect a stable order across map iteration.
+func cmpPort(a, b Port) int {
+	if d := int(a.Container) - int(b.Container); d != 0 {
+		return d
+	}
+	if d := strings.Compare(a.Protocol, b.Protocol); d != 0 {
+		return d
+	}
+
+	return int(a.Host) - int(b.Host)
 }
 
 // dockerConvertRestartPolicy converts a RestartPolicy to the Docker type.

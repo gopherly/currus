@@ -36,6 +36,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -78,6 +79,10 @@ type Fake struct {
 	netMembers map[currus.NetworkID]map[currus.ContainerID]struct{}
 	volumes    map[currus.VolumeID]currus.Volume
 	counter    atomic.Uint64
+	// ephemeralPort is a monotonic counter used to assign host ports when
+	// spec.Ports contains an entry with Host==0. Starts at 32768 (the first
+	// ephemeral port in the Linux default range).
+	ephemeralPort atomic.Uint64
 	// waitChs holds a per-container stop-signal channel created by StartContainer
 	// and closed by StopContainer. WaitContainer blocks on it for running containers.
 	waitChs map[currus.ContainerID]chan struct{}
@@ -87,6 +92,9 @@ type fakeContainer struct {
 	spec  currus.ContainerSpec
 	state string // "created" | "running" | "exited"
 	logs  string
+	// ports is the resolved port list derived from spec.Ports at creation time.
+	// Entries where spec Host==0 get an assigned ephemeral host port.
+	ports []currus.Port
 }
 
 // Compile-time assertions.
@@ -122,6 +130,9 @@ func New(opts ...FakeOption) *Fake {
 		volumes:    make(map[currus.VolumeID]currus.Volume),
 		waitChs:    make(map[currus.ContainerID]chan struct{}),
 	}
+	// Ephemeral port counter: first Add(1) returns 32768, the start of the
+	// Linux ephemeral port range (ip_local_port_range default: 32768–60999).
+	f.ephemeralPort.Store(32767)
 	for _, o := range opts {
 		o(f)
 	}
@@ -161,14 +172,17 @@ func (e *Fake) PullImage(_ context.Context, ref string, _ currus.PullImageOpts) 
 // CreateContainer creates an in-memory container. It does NOT require the
 // image to have been pulled first; the fake is permissive to ease test setup.
 // Any networks listed in spec.Networks are recorded as memberships immediately.
+// Port entries with Host==0 receive an assigned ephemeral host port so that
+// callers can test the "look up the assigned port" flow without a real daemon.
 func (e *Fake) CreateContainer(_ context.Context, spec currus.ContainerSpec) (currus.ContainerID, error) {
 	if err := spec.Validate(); err != nil {
 		return "", fmt.Errorf("currustest: create container: %w", err)
 	}
 	id := currus.ContainerID(fmt.Sprintf("fake-%d", e.counter.Add(1)))
+	ports := resolveEphemeralPorts(spec.Ports, &e.ephemeralPort)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.containers[id] = &fakeContainer{spec: spec, state: "created"}
+	e.containers[id] = &fakeContainer{spec: spec, state: "created", ports: ports}
 	for _, n := range spec.Networks {
 		netID := currus.NetworkID(n.Name)
 		if _, ok := e.netMembers[netID]; !ok {
@@ -321,6 +335,7 @@ func (e *Fake) Inspect(_ context.Context, id currus.ContainerID) (currus.Contain
 		Hostname:   c.spec.Hostname,
 		ExtraHosts: c.spec.ExtraHosts,
 		Init:       c.spec.Init,
+		Ports:      c.ports,
 	}, nil
 }
 
@@ -579,4 +594,43 @@ func (e *Fake) ContainerState(id currus.ContainerID) string {
 	}
 
 	return ""
+}
+
+// resolveEphemeralPorts copies the spec ports, assigning a monotonically
+// increasing host port to any entry where Host==0. The result is sorted the
+// same way as the Docker driver (container port, protocol, host port) so
+// callers get consistent ordering from both backends.
+func resolveEphemeralPorts(specPorts []currus.Port, counter *atomic.Uint64) []currus.Port {
+	if len(specPorts) == 0 {
+		return nil
+	}
+	out := make([]currus.Port, 0, len(specPorts))
+	for _, p := range specPorts {
+		proto := p.Protocol
+		if proto == "" {
+			proto = "tcp"
+		}
+		host := p.Host
+		if host == 0 {
+			host = uint16(counter.Add(1) & 0xFFFF)
+		}
+		out = append(out, currus.Port{
+			Container: p.Container,
+			Host:      host,
+			HostIP:    p.HostIP,
+			Protocol:  proto,
+		})
+	}
+	slices.SortFunc(out, func(a, b currus.Port) int {
+		if d := int(a.Container) - int(b.Container); d != 0 {
+			return d
+		}
+		if d := strings.Compare(a.Protocol, b.Protocol); d != 0 {
+			return d
+		}
+
+		return int(a.Host) - int(b.Host)
+	})
+
+	return out
 }
