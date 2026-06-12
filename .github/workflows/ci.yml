@@ -74,29 +74,6 @@ jobs:
           path: coverage-unit.out
           retention-days: 1
 
-  integration-docker:
-    name: Integration Tests — Docker
-    runs-on: ubuntu-latest
-    needs: [check]
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: cachix/install-nix-action@v31
-        with:
-          github_access_token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Run integration tests against Docker
-        env:
-          CURRUS_TEST_ENGINE: docker
-        run: nix run .#test-integration
-
-      - name: Upload coverage artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: coverage-integration-docker
-          path: coverage-integration.out
-          retention-days: 1
-
   integration-podman:
     name: Integration Tests — Podman
     runs-on: ubuntu-latest
@@ -108,25 +85,21 @@ jobs:
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Start Podman socket
-        run: |
-          systemctl --user enable --now podman.socket
-          echo "DOCKER_HOST=unix://${XDG_RUNTIME_DIR}/podman/podman.sock" >> "$GITHUB_ENV"
+      - name: Allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       - name: Run integration tests against Podman
-        env:
-          CURRUS_TEST_ENGINE: podman
-        run: nix run .#test-integration
+        run: nix run .#test-podman
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v7
         with:
           name: coverage-integration-podman
-          path: coverage-integration.out
+          path: coverage-podman.out
           retention-days: 1
 
-  integration-docker-rootless:
-    name: Integration Tests — Docker (rootless)
+  integration-docker:
+    name: Integration Tests — Docker
     runs-on: ubuntu-latest
     needs: [check]
     steps:
@@ -136,62 +109,21 @@ jobs:
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Start Docker rootless
-        env:
-          # The install script aborts when /var/run/docker.sock is writable;
-          # we stop rootful Docker below, so skip that guard explicitly.
-          FORCE_ROOTLESS_INSTALL: "1"
+      - name: Install rootless Docker prerequisites
         run: |
-          # GitHub runners ship rootful Docker; stop it so rootless can take over
-          sudo systemctl stop docker.service docker.socket || true
-          sudo systemctl disable docker.service docker.socket || true
-          # the stopped service leaves the socket file behind; remove it
-          sudo rm -f /var/run/docker.sock
-
-          # rootless prerequisite (newuidmap/newgidmap)
           sudo apt-get update -q
           sudo apt-get install -y uidmap
-
-          # Ubuntu 24.04 restricts unprivileged user namespaces, which RootlessKit
-          # needs; relax it so the rootless daemon can start (safe on ephemeral CI)
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
-          curl -fsSL https://get.docker.com/rootless | sh
-          export PATH=$HOME/bin:$PATH
-          export DOCKER_HOST=unix://${XDG_RUNTIME_DIR}/docker.sock
-          # the installer already starts docker.service; just wait for readiness
-          for i in $(seq 1 10); do
-            docker -H "$DOCKER_HOST" info >/dev/null 2>&1 && break
-            sleep 1
-          done
-          echo "DOCKER_HOST=unix://${XDG_RUNTIME_DIR}/docker.sock" >> "$GITHUB_ENV"
-          echo "PATH=$HOME/bin:$PATH" >> "$GITHUB_ENV"
-
       - name: Run integration tests against rootless Docker
-        env:
-          CURRUS_TEST_ENGINE: docker
-        run: nix run .#test-integration
+        run: nix run .#test-docker
 
-  integration-podman-rootless:
-    name: Integration Tests — Podman (rootless)
-    runs-on: ubuntu-latest
-    needs: [check]
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: cachix/install-nix-action@v31
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v7
         with:
-          github_access_token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Start Podman rootless socket
-        run: |
-          systemctl --user enable --now podman.socket
-          echo "DOCKER_HOST=unix://${XDG_RUNTIME_DIR}/podman/podman.sock" >> "$GITHUB_ENV"
-
-      - name: Run integration tests against rootless Podman
-        env:
-          CURRUS_TEST_ENGINE: podman
-        run: nix run .#test-integration
+          name: coverage-integration-docker
+          path: coverage-docker.out
+          retention-days: 1
 
   integration-containerd:
     name: Integration Tests — containerd
@@ -204,29 +136,45 @@ jobs:
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install containerd
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y containerd
-          sudo systemctl start containerd
-
       - name: Run integration tests against containerd
-        env:
-          CURRUS_TEST_ENGINE: containerd
-        run: nix run .#test-integration
+        run: nix run .#test-containerd
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v7
         with:
           name: coverage-integration-containerd
-          path: coverage-integration.out
+          path: coverage-containerd.out
+          retention-days: 1
+
+  integration-dind:
+    name: Integration Tests — DinD
+    runs-on: ubuntu-latest
+    needs: [check]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Run DinD integration tests
+        run: nix run .#test-dind
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-integration-dind
+          path: coverage-dind.out
           retention-days: 1
 
   report:
     name: Coverage Report
     runs-on: ubuntu-latest
-    needs: [unit-test, integration-docker, integration-podman, integration-containerd, integration-docker-rootless, integration-podman-rootless]
-    if: always() && (needs.unit-test.result == 'success' || needs.integration-docker.result == 'success' || needs.integration-containerd.result == 'success')
+    needs: [unit-test, integration-podman, integration-docker, integration-containerd, integration-dind]
+    if: always() && (needs.unit-test.result == 'success' || needs.integration-podman.result == 'success' || needs.integration-docker.result == 'success' || needs.integration-containerd.result == 'success' || needs.integration-dind.result == 'success')
     permissions:
       contents: read
       id-token: write
@@ -238,6 +186,13 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: coverage-unit
+
+      - name: Download Podman integration coverage
+        if: needs.integration-podman.result == 'success'
+        uses: actions/download-artifact@v8
+        with:
+          name: coverage-integration-podman
+          path: coverage-integration-podman
 
       - name: Download Docker integration coverage
         if: needs.integration-docker.result == 'success'
@@ -253,6 +208,13 @@ jobs:
           name: coverage-integration-containerd
           path: coverage-integration-containerd
 
+      - name: Download DinD integration coverage
+        if: needs.integration-dind.result == 'success'
+        uses: actions/download-artifact@v8
+        with:
+          name: coverage-integration-dind
+          path: coverage-integration-dind
+
       - name: Upload unit coverage to Codecov
         if: needs.unit-test.result == 'success'
         uses: codecov/codecov-action@v6
@@ -264,13 +226,24 @@ jobs:
           name: currus-unit
           disable_search: true
 
+      - name: Upload Podman integration coverage to Codecov
+        if: needs.integration-podman.result == 'success'
+        uses: codecov/codecov-action@v6
+        with:
+          use_oidc: true
+          fail_ci_if_error: true
+          files: ./coverage-integration-podman/coverage-podman.out
+          flags: integration
+          name: currus-integration-podman
+          disable_search: true
+
       - name: Upload Docker integration coverage to Codecov
         if: needs.integration-docker.result == 'success'
         uses: codecov/codecov-action@v6
         with:
           use_oidc: true
           fail_ci_if_error: true
-          files: ./coverage-integration-docker/coverage-integration.out
+          files: ./coverage-integration-docker/coverage-docker.out
           flags: integration
           name: currus-integration-docker
           disable_search: true
@@ -281,7 +254,18 @@ jobs:
         with:
           use_oidc: true
           fail_ci_if_error: true
-          files: ./coverage-integration-containerd/coverage-integration.out
+          files: ./coverage-integration-containerd/coverage-containerd.out
           flags: integration
           name: currus-integration-containerd
+          disable_search: true
+
+      - name: Upload DinD integration coverage to Codecov
+        if: needs.integration-dind.result == 'success'
+        uses: codecov/codecov-action@v6
+        with:
+          use_oidc: true
+          fail_ci_if_error: true
+          files: ./coverage-integration-dind/coverage-dind.out
+          flags: integration
+          name: currus-integration-dind
           disable_search: true

@@ -139,6 +139,10 @@ func openKind(ctx context.Context, kind EngineKind, cfg engineConfig) (Engine, e
 			socket = cfg.endpoint.Host
 			ns = cfg.endpoint.Namespace
 		}
+		// CONTAINERD_ADDRESS is the standard env var used by ctr and other containerd tools.
+		if socket == "" {
+			socket = os.Getenv("CONTAINERD_ADDRESS")
+		}
 
 		return newContainerdEngine(containerdConfig{
 			Socket:       socket,
