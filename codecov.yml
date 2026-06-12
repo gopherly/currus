@@ -1,0 +1,40 @@
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 2%
+      unit:
+        target: auto
+        threshold: 1%
+        flags:
+          - unittests
+      integration:
+        target: auto
+        threshold: 5%
+        flags:
+          - integration
+    patch:
+      default:
+        target: 80%
+        threshold: 0%
+
+flags:
+  unittests:
+    paths:
+      - "!testdata/"
+    carryforward: true
+  integration:
+    paths:
+      - "!testdata/"
+    carryforward: true
+
+comment:
+  layout: "reach, diff, flags, files"
+  behavior: default
+  require_changes: false
+  require_base: false
+  require_head: true
+
+ignore:
+  - "testdata/**"

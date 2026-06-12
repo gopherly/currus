@@ -114,6 +114,24 @@ func TestCtrdCtx(t *testing.T) {
 	assert.Equal(t, ns, got)
 }
 
+// TestContainerdEngineEndpoint verifies that Endpoint assembles the correct
+// host URI and propagates the daemonSocket and namespace fields.
+func TestContainerdEngineEndpoint(t *testing.T) {
+	t.Parallel()
+
+	e := &containerdEngine{
+		socket:       "/run/containerd/containerd.sock",
+		daemonSocket: "/host/run/containerd/containerd.sock",
+		namespace:    "k8s.io",
+		logger:       slog.Default(),
+	}
+
+	ep := e.Endpoint()
+	assert.Equal(t, "unix:///run/containerd/containerd.sock", ep.Host)
+	assert.Equal(t, "/host/run/containerd/containerd.sock", ep.DaemonSocket)
+	assert.Equal(t, "k8s.io", ep.Namespace)
+}
+
 // TestNewContainerdEngineDefaults verifies that newContainerdEngine applies
 // the expected default namespace and logger when the config fields are empty.
 // A real unix socket listener is created so the gRPC client constructor

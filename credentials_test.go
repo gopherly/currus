@@ -773,86 +773,114 @@ func TestCredentials_ParseAuthFile_Missing(t *testing.T) {
 	assert.Empty(t, cfg.Auths)
 }
 
-// TestCredentials_ParseRegistriesConf_WithHelpers verifies
-// registries.conf with helpers parses correctly.
-func TestCredentials_ParseRegistriesConf_WithHelpers(t *testing.T) {
+// TestCredentials_ParseRegistriesConf verifies all variants of
+// parseRegistriesConf: with helpers, sentinel-only, empty, and missing.
+func TestCredentials_ParseRegistriesConf(t *testing.T) {
 	t.Parallel()
 
-	cfg, err := parseRegistriesConf("testdata/credentials/registries/with_helpers.conf")
-	require.NoError(t, err)
+	tests := []struct {
+		name        string
+		path        string
+		wantHelpers []string
+	}{
+		{
+			name:        "with helpers",
+			path:        "testdata/credentials/registries/with_helpers.conf",
+			wantHelpers: []string{"test-helper", "containers-auth.json"},
+		},
+		{
+			name:        "sentinel only",
+			path:        "testdata/credentials/registries/sentinel_only.conf",
+			wantHelpers: []string{"containers-auth.json"},
+		},
+		{
+			name:        "empty file",
+			path:        "testdata/credentials/registries/empty.conf",
+			wantHelpers: nil,
+		},
+		{
+			name:        "missing file",
+			path:        "/does/not/exist/registries.conf",
+			wantHelpers: nil,
+		},
+	}
 
-	assert.Equal(t, []string{"test-helper", "containers-auth.json"}, cfg.CredentialHelpers)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg, err := parseRegistriesConf(tc.path)
+			require.NoError(t, err)
+			if tc.wantHelpers == nil {
+				assert.Empty(t, cfg.CredentialHelpers)
+			} else {
+				assert.Equal(t, tc.wantHelpers, cfg.CredentialHelpers)
+			}
+		})
+	}
 }
 
-// TestCredentials_ParseRegistriesConf_SentinelOnly verifies only the
-// sentinel helper name is returned.
-func TestCredentials_ParseRegistriesConf_SentinelOnly(t *testing.T) {
+// TestCredentials_DecodeInlineEntry verifies the three distinct decoding
+// paths: colon-in-password, identity-token-only, and direct username/password.
+func TestCredentials_DecodeInlineEntry(t *testing.T) {
 	t.Parallel()
 
-	cfg, err := parseRegistriesConf("testdata/credentials/registries/sentinel_only.conf")
-	require.NoError(t, err)
+	tests := []struct {
+		name          string
+		registry      string
+		raw           rawAuthEntry
+		wantUser      string
+		wantPass      string
+		wantToken     string
+		wantAuthEmpty bool
+		wantAuthSet   bool
+	}{
+		{
+			// "admin:s3cr3t:pass" — password contains a colon; must split on first colon only.
+			name:     "colon in password",
+			registry: "registry.example.com",
+			raw:      rawAuthEntry{Auth: "YWRtaW46czNjcjN0OnBhc3M="},
+			wantUser: "admin",
+			wantPass: "s3cr3t:pass",
+		},
+		{
+			name:          "identity token only",
+			registry:      "myregistry.io",
+			raw:           rawAuthEntry{IdentityToken: "some-oauth-token"},
+			wantToken:     "some-oauth-token",
+			wantAuthEmpty: true,
+		},
+		{
+			// Some clients write username/password directly without the auth field.
+			name:        "direct username and password",
+			registry:    "example.io",
+			raw:         rawAuthEntry{Username: "alice", Password: "secret"},
+			wantUser:    "alice",
+			wantPass:    "secret",
+			wantAuthSet: true,
+		},
+	}
 
-	assert.Equal(t, []string{"containers-auth.json"}, cfg.CredentialHelpers)
-}
-
-// TestCredentials_ParseRegistriesConf_Empty verifies an empty
-// registries.conf returns no helpers.
-func TestCredentials_ParseRegistriesConf_Empty(t *testing.T) {
-	t.Parallel()
-
-	cfg, err := parseRegistriesConf("testdata/credentials/registries/empty.conf")
-	require.NoError(t, err)
-
-	assert.Empty(t, cfg.CredentialHelpers)
-}
-
-// TestCredentials_ParseRegistriesConf_Missing verifies a missing
-// registries.conf returns no helpers without error.
-func TestCredentials_ParseRegistriesConf_Missing(t *testing.T) {
-	t.Parallel()
-
-	cfg, err := parseRegistriesConf("/does/not/exist/registries.conf")
-	require.NoErrorf(t, err, "missing file must not error")
-	assert.Empty(t, cfg.CredentialHelpers)
-}
-
-// TestCredentials_DecodeInlineEntry_ColonInPassword verifies passwords with
-// colons split only on the first colon.
-func TestCredentials_DecodeInlineEntry_ColonInPassword(t *testing.T) {
-	t.Parallel()
-
-	// "admin:s3cr3t:pass" — password contains a colon. Must split on FIRST colon only.
-	raw := rawAuthEntry{Auth: "YWRtaW46czNjcjN0OnBhc3M="}
-	entry := decodeInlineEntry("registry.example.com", raw)
-
-	assert.Equal(t, "admin", entry.Username)
-	assert.Equal(t, "s3cr3t:pass", entry.Password)
-}
-
-// TestCredentials_DecodeInlineEntry_IdentityToken verifies an
-// identity-token-only entry has no Auth field.
-func TestCredentials_DecodeInlineEntry_IdentityToken(t *testing.T) {
-	t.Parallel()
-
-	raw := rawAuthEntry{IdentityToken: "some-oauth-token"}
-	entry := decodeInlineEntry("myregistry.io", raw)
-
-	assert.Emptyf(t, entry.Auth, "no Auth when only IdentityToken is present")
-	assert.Equal(t, "some-oauth-token", entry.IdentityToken)
-}
-
-// TestCredentials_DecodeInlineEntry_DirectFields verifies
-// Username+Password synthesizes the Auth field.
-func TestCredentials_DecodeInlineEntry_DirectFields(t *testing.T) {
-	t.Parallel()
-
-	// Some clients write username/password directly without the auth field.
-	raw := rawAuthEntry{Username: "alice", Password: "secret"}
-	entry := decodeInlineEntry("example.io", raw)
-
-	assert.Equal(t, "alice", entry.Username)
-	assert.Equal(t, "secret", entry.Password)
-	assert.NotEmptyf(t, entry.Auth, "Auth must be synthesized from Username:Password")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			entry := decodeInlineEntry(tc.registry, tc.raw)
+			if tc.wantUser != "" {
+				assert.Equal(t, tc.wantUser, entry.Username)
+			}
+			if tc.wantPass != "" {
+				assert.Equal(t, tc.wantPass, entry.Password)
+			}
+			if tc.wantToken != "" {
+				assert.Equal(t, tc.wantToken, entry.IdentityToken)
+			}
+			if tc.wantAuthEmpty {
+				assert.Emptyf(t, entry.Auth, "no Auth when only IdentityToken is present")
+			}
+			if tc.wantAuthSet {
+				assert.NotEmptyf(t, entry.Auth, "Auth must be synthesized from Username:Password")
+			}
+		})
+	}
 }
 
 // TestCredentials_PodmanAuthPaths_ExplicitOverride verifies
@@ -884,81 +912,251 @@ func TestCredentials_PodmanAuthPaths_LegacyLast(t *testing.T) {
 	assert.Equal(t, "/home/user/.dockercfg", last.path)
 }
 
-// TestCredentials_DockerConfigFile_EnvOverride verifies DOCKER_CONFIG
-// overrides the default directory.
-func TestCredentials_DockerConfigFile_EnvOverride(t *testing.T) {
+// TestCredentials_DockerConfigFile verifies that dockerConfigFile uses
+// DOCKER_CONFIG when set and falls back to $HOME/.docker otherwise.
+func TestCredentials_DockerConfigFile(t *testing.T) {
 	t.Parallel()
 
-	env := credEnv{homeDir: "/home/user", dockerConfig: "/custom/docker"}
-	assert.Equal(t, "/custom/docker/config.json", dockerConfigFile(env))
-}
-
-// TestCredentials_DockerConfigFile_DefaultHome verifies the default config
-// path uses $HOME/.docker.
-func TestCredentials_DockerConfigFile_DefaultHome(t *testing.T) {
-	t.Parallel()
-
-	env := credEnv{homeDir: "/home/user"}
-	assert.Equal(t, "/home/user/.docker/config.json", dockerConfigFile(env))
-}
-
-// TestFakeCredentials_Empty verifies the test fake implements
-// CredentialProvider and returns empty by default.
-func TestFakeCredentials_Empty(t *testing.T) {
-	t.Parallel()
-
-	fake := newFakeForTest()
-	cp, ok := interface{}(fake).(CredentialProvider)
-	require.Truef(t, ok, "Fake must implement CredentialProvider")
-
-	creds, err := cp.Credentials(t.Context())
-	require.NoError(t, err)
-	assert.Emptyf(t, creds, "default fake returns empty credentials")
-}
-
-// TestFakeCredentials_WithCredentials verifies withFakeCredentials injects
-// a fixed credential map.
-func TestFakeCredentials_WithCredentials(t *testing.T) {
-	t.Parallel()
-
-	input := map[string]AuthEntry{
-		"ghcr.io": {
-			ServerURL: "ghcr.io",
-			Username:  "testuser",
-			Password:  "testpass",
-			Auth:      "dGVzdHVzZXI6dGVzdHBhc3M=",
+	tests := []struct {
+		name string
+		env  credEnv
+		want string
+	}{
+		{
+			name: "DOCKER_CONFIG override",
+			env:  credEnv{homeDir: "/home/user", dockerConfig: "/custom/docker"},
+			want: "/custom/docker/config.json",
+		},
+		{
+			name: "default home dir",
+			env:  credEnv{homeDir: "/home/user"},
+			want: "/home/user/.docker/config.json",
 		},
 	}
 
-	fake := newFakeForTest(withFakeCredentials(input))
-	cp, ok := interface{}(fake).(CredentialProvider)
-	require.True(t, ok)
-
-	creds, err := cp.Credentials(t.Context())
-	require.NoError(t, err)
-	assert.Equal(t, input, creds)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.want, dockerConfigFile(tc.env))
+		})
+	}
 }
 
-// TestFakeCredentials_ReturnsCopy verifies Credentials returns a copy so
-// callers cannot mutate the fake's state.
-func TestFakeCredentials_ReturnsCopy(t *testing.T) {
+// TestFakeCredentials verifies the credential behavior of the test fake:
+// empty by default, injectable via withFakeCredentials, and immutable from
+// the caller's perspective (each call returns a fresh copy).
+func TestFakeCredentials(t *testing.T) {
 	t.Parallel()
 
-	input := map[string]AuthEntry{
-		"ghcr.io": {Username: "user"},
+	t.Run("empty by default", func(t *testing.T) {
+		t.Parallel()
+		fake := newFakeForTest()
+		cp, ok := interface{}(fake).(CredentialProvider)
+		require.Truef(t, ok, "Fake must implement CredentialProvider")
+
+		creds, err := cp.Credentials(t.Context())
+		require.NoError(t, err)
+		assert.Emptyf(t, creds, "default fake returns empty credentials")
+	})
+
+	t.Run("withFakeCredentials injects fixed map", func(t *testing.T) {
+		t.Parallel()
+		input := map[string]AuthEntry{
+			"ghcr.io": {
+				ServerURL: "ghcr.io",
+				Username:  "testuser",
+				Password:  "testpass",
+				Auth:      "dGVzdHVzZXI6dGVzdHBhc3M=",
+			},
+		}
+		fake := newFakeForTest(withFakeCredentials(input))
+		cp, ok := interface{}(fake).(CredentialProvider)
+		require.True(t, ok)
+
+		creds, err := cp.Credentials(t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, input, creds)
+	})
+
+	t.Run("returns a copy so callers cannot mutate fake state", func(t *testing.T) {
+		t.Parallel()
+		input := map[string]AuthEntry{
+			"ghcr.io": {Username: "user"},
+		}
+		fake := newFakeForTest(withFakeCredentials(input))
+		cp, ok := interface{}(fake).(CredentialProvider)
+		require.Truef(t, ok, "testFake must implement CredentialProvider")
+
+		c1, err := cp.Credentials(t.Context())
+		require.NoError(t, err)
+		c1["ghcr.io"] = AuthEntry{Username: "mutated"}
+
+		c2, err := cp.Credentials(t.Context())
+		require.NoError(t, err)
+		assert.Equalf(t, "user", c2["ghcr.io"].Username,
+			"Credentials() must return a copy; mutating the result must not affect the fake")
+	})
+}
+
+// TestCredentials_DecodeBase64CredentialsEmpty verifies that
+// decodeBase64Credentials returns empty strings for inputs that cannot be
+// decoded into a "username:password" pair.
+func TestCredentials_DecodeBase64CredentialsEmpty(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		auth string
+	}{
+		{
+			name: "invalid base64 characters",
+			auth: "!!invalid-base64!!",
+		},
+		{
+			// base64("justausername") — valid base64 but no colon separator
+			name: "no colon in decoded payload",
+			auth: "anVzdGF1c2VybmFtZQ==",
+		},
 	}
-	fake := newFakeForTest(withFakeCredentials(input))
-	cp, ok := interface{}(fake).(CredentialProvider)
-	require.Truef(t, ok, "testFake must implement CredentialProvider")
 
-	c1, err := cp.Credentials(t.Context())
-	require.NoError(t, err)
-	c1["ghcr.io"] = AuthEntry{Username: "mutated"}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			u, p := decodeBase64Credentials(tc.auth)
+			assert.Emptyf(t, u, "username must be empty")
+			assert.Emptyf(t, p, "password must be empty")
+		})
+	}
+}
 
-	c2, err := cp.Credentials(t.Context())
-	require.NoError(t, err)
-	assert.Equalf(t, "user", c2["ghcr.io"].Username,
-		"Credentials() must return a copy; mutating the result must not affect the fake")
+// TestCredentials_ParseAuthFileMalformed verifies that parseAuthFile returns
+// an error when the file contains malformed JSON.
+func TestCredentials_ParseAuthFileMalformed(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "auth.json")
+	require.NoError(t, os.WriteFile(path, []byte("this is not json"), 0o600))
+
+	_, err := parseAuthFile(authFilePath{path: path})
+	require.Errorf(t, err, "malformed JSON must return an error")
+}
+
+// TestCredentials_ResolvePodmanRegistryCredHelperFallthrough verifies that
+// resolvePodmanRegistry falls through to inline auths when a per-registry
+// credHelper is registered but the helper binary is not on PATH.
+func TestCredentials_ResolvePodmanRegistryCredHelperFallthrough(t *testing.T) {
+	t.Parallel()
+
+	cfg := registryConfig{
+		// A helper that definitely does not exist on PATH.
+		CredHelpers: map[string]string{
+			"my-registry.io": "definitely-not-installed-xyz-helper",
+		},
+		Auths: map[string]rawAuthEntry{
+			"my-registry.io": {Username: "alice", Password: "s3cr3t"},
+		},
+	}
+
+	entry, found := resolvePodmanRegistry(
+		t.Context(),
+		noopLogger(),
+		"my-registry.io",
+		cfg,
+		nil, // no global helpers
+	)
+	require.Truef(t, found, "should fall through to inline auths")
+	assert.Equal(t, "alice", entry.Username)
+	assert.Equal(t, "s3cr3t", entry.Password)
+}
+
+// TestCredentials_SnapshotCredEnv verifies that snapshotCredEnv reads the
+// relevant environment variables into the credEnv struct.
+func TestCredentials_SnapshotCredEnv(t *testing.T) {
+	t.Setenv("DOCKER_CONFIG", "/custom/docker")
+	t.Setenv("XDG_RUNTIME_DIR", "/run/user/1000")
+	t.Setenv("XDG_CONFIG_HOME", "/home/user/.config")
+	t.Setenv("REGISTRY_AUTH_FILE", "/custom/auth.json")
+
+	env := snapshotCredEnv()
+
+	assert.Equal(t, "/custom/docker", env.dockerConfig)
+	assert.Equal(t, "/run/user/1000", env.xdgRuntimeDir)
+	assert.Equal(t, "/home/user/.config", env.xdgConfigHome)
+	assert.Equal(t, "/custom/auth.json", env.registryAuthFile)
+	// homeDir is populated from os.UserHomeDir (non-empty on any CI machine).
+	assert.NotEmpty(t, env.homeDir)
+}
+
+// TestCredentials_ResolveDockerRegistryEmptyAuths verifies that
+// resolveDockerRegistry returns no entry when the registry is present in
+// Auths but has all empty fields.
+func TestCredentials_ResolveDockerRegistryEmptyAuths(t *testing.T) {
+	t.Parallel()
+
+	cfg := registryConfig{
+		Auths: map[string]rawAuthEntry{
+			"sparse.io": {}, // all fields are zero-value
+		},
+		CredHelpers: map[string]string{},
+	}
+
+	_, found := resolveDockerRegistry(t.Context(), noopLogger(), "sparse.io", cfg)
+	assert.Falsef(t, found, "empty auths entry must not produce a credential")
+}
+
+// TestCredentials_ResolvePodmanRegistryNotFound verifies resolvePodmanRegistry
+// returns not-found for inputs that cannot yield a credential.
+func TestCredentials_ResolvePodmanRegistryNotFound(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		registry string
+		cfg      registryConfig
+	}{
+		{
+			name:     "registry absent from all sources",
+			registry: "missing.io",
+			cfg: registryConfig{
+				Auths: map[string]rawAuthEntry{"other.io": {Username: "user"}},
+			},
+		},
+		{
+			name:     "inline auth entry present but all fields zero",
+			registry: "empty.io",
+			cfg: registryConfig{
+				Auths: map[string]rawAuthEntry{"empty.io": {}},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, found := resolvePodmanRegistry(t.Context(), noopLogger(), tc.registry, tc.cfg, nil)
+			assert.False(t, found)
+		})
+	}
+}
+
+// TestCredentials_ResolvePodmanRegistryGlobalHelperMiss verifies that
+// resolvePodmanRegistry tries the global helpers list and falls through to
+// inline auths when each helper misses the registry.
+func TestCredentials_ResolvePodmanRegistryGlobalHelperMiss(t *testing.T) {
+	t.Parallel()
+
+	cfg := registryConfig{
+		Auths: map[string]rawAuthEntry{
+			"my.io": {Username: "alice", Password: "secret"},
+		},
+	}
+	// Non-existent global helper: helperGet returns (false, nil), so we continue.
+	globalHelpers := []string{"definitely-nonexistent-global-helper-xyz"}
+
+	entry, found := resolvePodmanRegistry(t.Context(), noopLogger(), "my.io", cfg, globalHelpers)
+	require.Truef(t, found, "should fall through to inline auths after global helper miss")
+	assert.Equal(t, "alice", entry.Username)
 }
 
 // These thin wrappers let credentials_test.go reach into the currustest

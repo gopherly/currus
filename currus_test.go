@@ -144,6 +144,15 @@ func TestWithTracerProvider(t *testing.T) {
 	assert.Equal(t, tp, cfg.tracer)
 }
 
+// TestWithDaemonSocket verifies that WithDaemonSocket writes the socket path
+// override to engineConfig.daemonSocket.
+func TestWithDaemonSocket(t *testing.T) {
+	t.Parallel()
+	var cfg engineConfig
+	WithDaemonSocket("/custom/daemon.sock")(&cfg)
+	assert.Equal(t, "/custom/daemon.sock", cfg.daemonSocket)
+}
+
 // testCertPEM generates a self-signed ECDSA certificate and returns the cert
 // and key encoded as PEM byte slices.
 func testCertPEM(t *testing.T) ([]byte, []byte) {
