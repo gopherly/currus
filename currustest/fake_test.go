@@ -15,9 +15,11 @@
 package currustest_test
 
 import (
+	"context"
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -674,4 +676,191 @@ func TestFakeListContainersFilter(t *testing.T) {
 		}
 	}
 	assert.Truef(t, found, "created container should appear with All=true")
+}
+
+// TestFakeWaitContainerContextCancel verifies that WaitContainer returns an
+// error through the result channel when the context is canceled while the
+// container is still running.
+func TestFakeWaitContainerContextCancel(t *testing.T) {
+	t.Parallel()
+	eng := currustest.New()
+	ctx := t.Context()
+
+	id, err := eng.CreateContainer(ctx, currus.ContainerSpec{Image: "alpine"})
+	require.NoError(t, err)
+	require.NoError(t, eng.StartContainer(ctx, id))
+
+	cancelCtx, cancel := context.WithCancel(ctx)
+	ch, err := eng.WaitContainer(cancelCtx, id, currus.WaitContainerOpts{})
+	require.NoError(t, err)
+
+	// Cancel before the container is stopped.
+	cancel()
+
+	select {
+	case res := <-ch:
+		assert.NotEmptyf(t, res.Error, "cancelled context should populate result.Error")
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for WaitContainer to propagate context cancellation")
+	}
+}
+
+// TestFakeWaitContainerStopThenWait verifies that calling WaitContainer after
+// the container is already stopped yields StatusCode 0 immediately.
+func TestFakeWaitContainerStopThenWait(t *testing.T) {
+	t.Parallel()
+	eng := currustest.New()
+	ctx := t.Context()
+
+	id, err := eng.CreateContainer(ctx, currus.ContainerSpec{Image: "alpine"})
+	require.NoError(t, err)
+	require.NoError(t, eng.StartContainer(ctx, id))
+	require.NoError(t, eng.StopContainer(ctx, id, currus.StopContainerOpts{}))
+
+	ch, err := eng.WaitContainer(ctx, id, currus.WaitContainerOpts{})
+	require.NoError(t, err)
+
+	select {
+	case res := <-ch:
+		assert.Equal(t, 0, res.StatusCode)
+		assert.Empty(t, res.Error)
+	case <-time.After(time.Second):
+		t.Fatal("timed out: WaitContainer on stopped container should resolve immediately")
+	}
+}
+
+// TestFakeRemoveContainerForceRunning verifies that RemoveContainer with
+// Force=true removes a running container without returning ErrConflict.
+func TestFakeRemoveContainerForceRunning(t *testing.T) {
+	t.Parallel()
+	eng := currustest.New()
+	ctx := t.Context()
+
+	id, err := eng.CreateContainer(ctx, currus.ContainerSpec{Image: "alpine"})
+	require.NoError(t, err)
+	require.NoError(t, eng.StartContainer(ctx, id))
+
+	// Without Force, a running container returns ErrConflict.
+	err = eng.RemoveContainer(ctx, id, currus.RemoveContainerOpts{Force: false})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, currus.ErrConflict)
+
+	// With Force=true it must succeed even though the container is running.
+	require.NoError(t, eng.RemoveContainer(ctx, id, currus.RemoveContainerOpts{Force: true}))
+
+	// Container is gone.
+	list, err := eng.ListContainers(ctx, currus.ListContainersOpts{All: true})
+	require.NoError(t, err)
+	for _, c := range list {
+		assert.NotEqualf(t, id, c.ID, "force-removed container should not appear in list")
+	}
+}
+
+// TestFakeCreateContainerDuplicateName verifies that two containers can be
+// created with the same name because the fake assigns unique IDs.
+func TestFakeCreateContainerDuplicateName(t *testing.T) {
+	t.Parallel()
+	eng := currustest.New()
+	ctx := t.Context()
+
+	id1, err := eng.CreateContainer(ctx, currus.ContainerSpec{Image: "alpine", Name: "app"})
+	require.NoError(t, err)
+
+	// The fake does not enforce unique names, matching behavior the
+	// conformance suite documents: duplicate-name conflicts are left to the
+	// real daemon. A second create with the same name should succeed.
+	id2, err := eng.CreateContainer(ctx, currus.ContainerSpec{Image: "nginx", Name: "app"})
+	require.NoError(t, err)
+
+	// Both IDs must be distinct.
+	assert.NotEqual(t, id1, id2)
+}
+
+// TestFakeCredentials covers the Credentials method in both the default
+// (empty) and the WithCredentials-injected cases.
+func TestFakeCredentials(t *testing.T) {
+	t.Parallel()
+
+	t.Run("default returns empty non-nil map", func(t *testing.T) {
+		t.Parallel()
+
+		eng := currustest.New()
+		got, err := eng.Credentials(t.Context())
+		require.NoError(t, err)
+		assert.Empty(t, got)
+		assert.NotNil(t, got)
+	})
+
+	t.Run("WithCredentials injects fixed credential map", func(t *testing.T) {
+		t.Parallel()
+
+		creds := map[string]currus.AuthEntry{
+			"registry.example.com": {Username: "user", Password: "pass"},
+		}
+		eng := currustest.New(currustest.WithCredentials(creds))
+
+		got, err := eng.Credentials(t.Context())
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		entry, ok := got["registry.example.com"]
+		require.True(t, ok)
+		assert.Equal(t, "user", entry.Username)
+		assert.Equal(t, "pass", entry.Password)
+	})
+}
+
+// TestFakeStatsRunningContainer verifies that Stats succeeds on a running
+// container (returning zeroed stats, since the fake doesn't collect real data).
+func TestFakeStatsRunningContainer(t *testing.T) {
+	t.Parallel()
+	eng := currustest.New()
+	ctx := t.Context()
+
+	id, err := eng.CreateContainer(ctx, currus.ContainerSpec{Image: "alpine"})
+	require.NoError(t, err)
+	require.NoError(t, eng.StartContainer(ctx, id))
+
+	_, err = eng.Stats(ctx, id, currus.StatsOpts{})
+	// The fake returns zero-value stats; just verify the call succeeds.
+	require.NoError(t, err)
+}
+
+// TestFakeResolveEphemeralPorts verifies that containers created with
+// Host==0 port bindings receive monotonically assigned ephemeral host ports.
+func TestFakeResolveEphemeralPorts(t *testing.T) {
+	t.Parallel()
+	eng := currustest.New()
+	ctx := t.Context()
+
+	spec := currus.ContainerSpec{
+		Image: "nginx",
+		Ports: []currus.Port{
+			{Container: 80, Host: 0, Protocol: "tcp"},     // ephemeral
+			{Container: 443, Host: 8443, Protocol: "tcp"}, // explicit
+		},
+	}
+	id, err := eng.CreateContainer(ctx, spec)
+	require.NoError(t, err)
+
+	info, err := eng.Inspect(ctx, id)
+	require.NoError(t, err)
+	require.Len(t, info.Ports, 2)
+
+	// Port 443 must keep its explicit host port.
+	var port443 currus.Port
+	for _, p := range info.Ports {
+		if p.Container == 443 {
+			port443 = p
+		}
+	}
+	assert.Equal(t, uint16(8443), port443.Host)
+
+	// Port 80 must have a non-zero assigned host port.
+	var port80 currus.Port
+	for _, p := range info.Ports {
+		if p.Container == 80 {
+			port80 = p
+		}
+	}
+	assert.NotZerof(t, port80.Host, "ephemeral port should be assigned")
 }

@@ -17,6 +17,7 @@ package currus
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"testing"
 
 	"github.com/moby/moby/api/types/container"
@@ -475,5 +476,220 @@ func TestDockerNetInputOutput(t *testing.T) {
 		}
 		assert.Equal(t, uint64(150), dockerNetInput(s))
 		assert.Equal(t, uint64(275), dockerNetOutput(s))
+	})
+}
+
+// TestCmpPort verifies that cmpPort sorts by container port first, then
+// protocol, then host port. This is the sort key used by dockerInspectPorts.
+func TestCmpPort(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		a, b Port
+		want int // sign only: negative / zero / positive
+	}{
+		{
+			name: "same port same protocol same host returns zero",
+			a:    Port{Container: 80, Protocol: "tcp", Host: 8080},
+			b:    Port{Container: 80, Protocol: "tcp", Host: 8080},
+			want: 0,
+		},
+		{
+			name: "lower container port sorts first",
+			a:    Port{Container: 80, Protocol: "tcp"},
+			b:    Port{Container: 443, Protocol: "tcp"},
+			want: -1,
+		},
+		{
+			name: "higher container port sorts last",
+			a:    Port{Container: 443, Protocol: "tcp"},
+			b:    Port{Container: 80, Protocol: "tcp"},
+			want: 1,
+		},
+		{
+			name: "same container port: tcp before udp",
+			a:    Port{Container: 53, Protocol: "tcp"},
+			b:    Port{Container: 53, Protocol: "udp"},
+			want: -1,
+		},
+		{
+			name: "same container port: udp after tcp",
+			a:    Port{Container: 53, Protocol: "udp"},
+			b:    Port{Container: 53, Protocol: "tcp"},
+			want: 1,
+		},
+		{
+			name: "same container port and protocol: lower host port first",
+			a:    Port{Container: 80, Protocol: "tcp", Host: 8080},
+			b:    Port{Container: 80, Protocol: "tcp", Host: 9090},
+			want: -1,
+		},
+		{
+			name: "same container port and protocol: higher host port last",
+			a:    Port{Container: 80, Protocol: "tcp", Host: 9090},
+			b:    Port{Container: 80, Protocol: "tcp", Host: 8080},
+			want: 1,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := cmpPort(tc.a, tc.b)
+			switch {
+			case tc.want < 0:
+				assert.Negative(t, got)
+			case tc.want > 0:
+				assert.Positive(t, got)
+			default:
+				assert.Zero(t, got)
+			}
+		})
+	}
+}
+
+// TestDockerInspectPorts verifies dockerInspectPorts covers all branches:
+// running container (NetworkSettings), stopped container (HostConfig fallback),
+// ephemeral port skip, HostIP handling, nil inputs, and sort order.
+func TestDockerInspectPorts(t *testing.T) {
+	t.Parallel()
+
+	mustParseIP := func(s string) netip.Addr {
+		t.Helper()
+		addr, err := netip.ParseAddr(s)
+		require.NoError(t, err)
+
+		return addr
+	}
+
+	makePortKey := func(portProto string) network.Port {
+		t.Helper()
+		p, err := network.ParsePort(portProto)
+		require.NoError(t, err)
+
+		return p
+	}
+
+	t.Run("nil network settings and nil host config returns nil", func(t *testing.T) {
+		t.Parallel()
+		assert.Nil(t, dockerInspectPorts(nil, nil))
+	})
+
+	t.Run("empty port map returns nil", func(t *testing.T) {
+		t.Parallel()
+		ns := &container.NetworkSettings{Ports: network.PortMap{}}
+		assert.Nil(t, dockerInspectPorts(ns, nil))
+	})
+
+	t.Run("running container: uses NetworkSettings.Ports", func(t *testing.T) {
+		t.Parallel()
+		ns := &container.NetworkSettings{
+			Ports: network.PortMap{
+				makePortKey("80/tcp"): []network.PortBinding{
+					{HostPort: "8080"},
+				},
+			},
+		}
+		hc := &container.HostConfig{
+			PortBindings: network.PortMap{
+				makePortKey("80/tcp"): []network.PortBinding{
+					{HostPort: "9999"},
+				},
+			},
+		}
+		ports := dockerInspectPorts(ns, hc)
+		require.Len(t, ports, 1)
+		assert.Equal(t, uint16(80), ports[0].Container)
+		assert.Equal(t, uint16(8080), ports[0].Host)
+		assert.Equal(t, "tcp", ports[0].Protocol)
+	})
+
+	t.Run("stopped container: falls back to HostConfig.PortBindings", func(t *testing.T) {
+		t.Parallel()
+		hc := &container.HostConfig{
+			PortBindings: network.PortMap{
+				makePortKey("443/tcp"): []network.PortBinding{
+					{HostPort: "8443"},
+				},
+			},
+		}
+		ports := dockerInspectPorts(nil, hc)
+		require.Len(t, ports, 1)
+		assert.Equal(t, uint16(443), ports[0].Container)
+		assert.Equal(t, uint16(8443), ports[0].Host)
+	})
+
+	t.Run("empty HostPort entries are skipped", func(t *testing.T) {
+		t.Parallel()
+		hc := &container.HostConfig{
+			PortBindings: network.PortMap{
+				makePortKey("80/tcp"): []network.PortBinding{
+					{HostPort: ""},     // ephemeral — skipped
+					{HostPort: "8080"}, // explicit — included
+				},
+			},
+		}
+		ports := dockerInspectPorts(nil, hc)
+		require.Len(t, ports, 1)
+		assert.Equal(t, uint16(8080), ports[0].Host)
+	})
+
+	t.Run("all empty HostPorts returns nil", func(t *testing.T) {
+		t.Parallel()
+		hc := &container.HostConfig{
+			PortBindings: network.PortMap{
+				makePortKey("80/tcp"): []network.PortBinding{
+					{HostPort: ""},
+				},
+			},
+		}
+		assert.Nil(t, dockerInspectPorts(nil, hc))
+	})
+
+	t.Run("HostIP is included when valid", func(t *testing.T) {
+		t.Parallel()
+		hc := &container.HostConfig{
+			PortBindings: network.PortMap{
+				makePortKey("80/tcp"): []network.PortBinding{
+					{HostPort: "8080", HostIP: mustParseIP("127.0.0.1")},
+				},
+			},
+		}
+		ports := dockerInspectPorts(nil, hc)
+		require.Len(t, ports, 1)
+		assert.Equal(t, "127.0.0.1", ports[0].HostIP)
+	})
+
+	t.Run("ports are sorted by container port then protocol then host port", func(t *testing.T) {
+		t.Parallel()
+		hc := &container.HostConfig{
+			PortBindings: network.PortMap{
+				makePortKey("443/tcp"): []network.PortBinding{{HostPort: "8443"}},
+				makePortKey("80/tcp"):  []network.PortBinding{{HostPort: "8080"}},
+				makePortKey("53/udp"):  []network.PortBinding{{HostPort: "5353"}},
+				makePortKey("53/tcp"):  []network.PortBinding{{HostPort: "5354"}},
+			},
+		}
+		ports := dockerInspectPorts(nil, hc)
+		require.Len(t, ports, 4)
+		assert.Equal(t, uint16(53), ports[0].Container)
+		assert.Equal(t, "tcp", ports[0].Protocol)
+		assert.Equal(t, uint16(53), ports[1].Container)
+		assert.Equal(t, "udp", ports[1].Protocol)
+		assert.Equal(t, uint16(80), ports[2].Container)
+		assert.Equal(t, uint16(443), ports[3].Container)
+	})
+
+	t.Run("UDP protocol preserved", func(t *testing.T) {
+		t.Parallel()
+		hc := &container.HostConfig{
+			PortBindings: network.PortMap{
+				makePortKey("53/udp"): []network.PortBinding{{HostPort: "5353"}},
+			},
+		}
+		ports := dockerInspectPorts(nil, hc)
+		require.Len(t, ports, 1)
+		assert.Equal(t, "udp", ports[0].Protocol)
 	})
 }

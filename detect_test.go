@@ -20,8 +20,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -123,22 +126,28 @@ func TestOpenKindUnsupported(t *testing.T) {
 	assert.ErrorIs(t, err, ErrUnsupported)
 }
 
-// TestOpenKindDockerTLSError verifies that openKind surfaces TLS configuration
-// errors when connecting to a Docker endpoint.
-func TestOpenKindDockerTLSError(t *testing.T) {
+// TestOpenKindTLSErrors verifies that openKind surfaces TLS configuration
+// errors for both Docker and Podman when invalid cert/key bytes are provided.
+func TestOpenKindTLSErrors(t *testing.T) {
 	t.Parallel()
-	ep := Endpoint{TLS: &TLSConfig{Cert: []byte("not-a-cert"), Key: []byte("not-a-key")}}
-	_, err := openKind(t.Context(), Docker, buildEngineConfig([]Option{WithEndpoint(ep)}))
-	assert.Error(t, err)
-}
 
-// TestOpenKindPodmanTLSError is the same as TestOpenKindDockerTLSError but for
-// the Podman path.
-func TestOpenKindPodmanTLSError(t *testing.T) {
-	t.Parallel()
 	ep := Endpoint{TLS: &TLSConfig{Cert: []byte("not-a-cert"), Key: []byte("not-a-key")}}
-	_, err := openKind(t.Context(), Podman, buildEngineConfig([]Option{WithEndpoint(ep)}))
-	assert.Error(t, err)
+
+	tests := []struct {
+		name string
+		kind EngineKind
+	}{
+		{"docker", Docker},
+		{"podman", Podman},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := openKind(t.Context(), tc.kind, buildEngineConfig([]Option{WithEndpoint(ep)}))
+			assert.Error(t, err)
+		})
+	}
 }
 
 // TestOpenKindDocker verifies that openKind returns a Docker-kind engine.
@@ -387,6 +396,18 @@ func TestDockerTLSFromEnv(t *testing.T) {
 		_, err := dockerTLSFromEnv()
 		require.Error(t, err)
 	})
+
+	t.Run("DOCKER_CERT_PATH empty falls back to home dir", func(t *testing.T) {
+		// Use a temp dir as HOME so ~/.docker/ca.pem won't exist.
+		tmpHome := t.TempDir()
+		t.Setenv("HOME", tmpHome)
+		t.Setenv("DOCKER_TLS_VERIFY", "1")
+		t.Setenv("DOCKER_CERT_PATH", "")
+		_, err := dockerTLSFromEnv()
+		// Either the fallback path works and ca.pem is missing (read error),
+		// or UserHomeDir fails — in both cases an error is expected.
+		require.Error(t, err)
+	})
 }
 
 // TestEnvEndpoint covers the full envEndpoint resolution logic.
@@ -526,42 +547,48 @@ func TestEnvEndpoint(t *testing.T) {
 	})
 }
 
-// TestNewViaDOCKER_HOST verifies that New() picks up DOCKER_HOST.
-// This test is daemon-adaptive: when no daemon listens at the fake socket,
-// resolveInfo fails with ErrDaemonInfo.
-func TestNewViaDOCKER_HOST(t *testing.T) {
-	clearDockerEnv(t)
-	t.Setenv("DOCKER_HOST", "unix:///tmp/fake-docker.sock")
-	eng, err := New(t.Context())
-	if err != nil {
-		assert.ErrorIs(t, err, ErrDaemonInfo)
-		return
+// TestNewViaHostEnvVar verifies that New() honors both DOCKER_HOST and
+// CONTAINER_HOST and maps each to the expected engine kind. The tests are
+// daemon-adaptive: when no daemon listens at the fake socket, resolveInfo
+// fails with ErrDaemonInfo, which is also an accepted outcome.
+func TestNewViaHostEnvVar(t *testing.T) {
+	tests := []struct {
+		name     string
+		envKey   string
+		envVal   string
+		wantKind EngineKind
+	}{
+		{
+			name:     "DOCKER_HOST",
+			envKey:   "DOCKER_HOST",
+			envVal:   "unix:///tmp/fake-docker.sock",
+			wantKind: Docker,
+		},
+		{
+			name:     "CONTAINER_HOST",
+			envKey:   "CONTAINER_HOST",
+			envVal:   "unix:///tmp/fake-podman.sock",
+			wantKind: Podman,
+		},
 	}
-	t.Cleanup(func() {
-		if closeErr := eng.Close(); closeErr != nil {
-			t.Logf("close engine: %v", closeErr)
-		}
-	})
-	assert.Equal(t, Docker, eng.Kind())
-}
 
-// TestNewViaCONTAINER_HOST verifies that New() picks up CONTAINER_HOST.
-// This test is daemon-adaptive: when no daemon listens at the fake socket,
-// resolveInfo fails with ErrDaemonInfo.
-func TestNewViaCONTAINER_HOST(t *testing.T) {
-	clearDockerEnv(t)
-	t.Setenv("CONTAINER_HOST", "unix:///tmp/fake-podman.sock")
-	eng, err := New(t.Context())
-	if err != nil {
-		assert.ErrorIs(t, err, ErrDaemonInfo)
-		return
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			clearDockerEnv(t)
+			t.Setenv(tc.envKey, tc.envVal)
+			eng, err := New(t.Context())
+			if err != nil {
+				assert.ErrorIs(t, err, ErrDaemonInfo)
+				return
+			}
+			t.Cleanup(func() {
+				if closeErr := eng.Close(); closeErr != nil {
+					t.Logf("close engine: %v", closeErr)
+				}
+			})
+			assert.Equal(t, tc.wantKind, eng.Kind())
+		})
 	}
-	t.Cleanup(func() {
-		if closeErr := eng.Close(); closeErr != nil {
-			t.Logf("close engine: %v", closeErr)
-		}
-	})
-	assert.Equal(t, Podman, eng.Kind())
 }
 
 // TestNewDockerHostContextConflict verifies that New() returns ErrInvalidSpec
@@ -651,4 +678,131 @@ func writeTLSFiles(t *testing.T) string {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "key.pem"), []byte("fake-key"), 0o600))
 
 	return dir
+}
+
+// newMockDockerInfo starts a minimal mock Docker daemon that handles /info
+// (for resolveInfo) and /_ping (for API version negotiation). It returns an
+// Endpoint pointing at the mock server.
+func newMockDockerInfo(t *testing.T) Endpoint {
+	t.Helper()
+
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("HEAD /_ping", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Api-Version", "1.54")
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("GET /_ping", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Api-Version", "1.54")
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("OK")) //nolint:errcheck
+	})
+
+	// Version-stripping wrapper so the moby client's /v1.54/info request
+	// reaches our registered handler at /info.
+	outer := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if strings.HasPrefix(path, "/v") {
+			if idx := strings.Index(path[2:], "/"); idx >= 0 {
+				path = path[2+idx:]
+			}
+		}
+		r2 := r.Clone(r.Context())
+		r2.URL.Path = path
+		mux.ServeHTTP(w, r2)
+	})
+
+	mux.HandleFunc("GET /info", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"SecurityOptions":[]}`)) //nolint:errcheck
+	})
+
+	srv := httptest.NewServer(outer)
+	t.Cleanup(srv.Close)
+
+	return Endpoint{Host: "tcp://" + srv.Listener.Addr().String()}
+}
+
+// TestMustNewSuccess verifies that MustNew returns a valid engine when a
+// Docker daemon is reachable. A minimal mock daemon serves /info so that
+// resolveInfo succeeds.
+func TestMustNewSuccess(t *testing.T) {
+	t.Parallel()
+	ep := newMockDockerInfo(t)
+
+	eng := MustNew(t.Context(),
+		WithEngine(Docker),
+		WithEndpoint(ep),
+	)
+	t.Cleanup(func() { assert.NoError(t, eng.Close()) })
+	assert.Equal(t, Docker, eng.Kind())
+}
+
+// TestAutoDetectSkipsEmptySocket exercises the branch in autoDetect that
+// skips candidates whose socket path is empty. Setting HOME="" on Linux
+// causes dockerDesktopSocket() and potentially podmanRootlessSocket() to
+// return "", which are then skipped. This test is environment-adaptive: if a
+// real daemon is still reachable via a hardcoded path, we assert the returned
+// engine is non-nil; if no daemon is reachable we assert ErrNoEngine.
+func TestAutoDetectSkipsEmptySocket(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "")
+	t.Setenv("CONTAINER_HOST", "")
+	t.Setenv("DOCKER_CONTEXT", "")
+	t.Setenv("CONTAINER_ENGINE", "")
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+
+	eng, err := New(t.Context())
+	if err != nil {
+		// Expected in environments without a running daemon.
+		assert.ErrorIs(t, err, ErrNoEngine)
+		return
+	}
+	// A daemon was found via a hardcoded socket path; close it.
+	t.Cleanup(func() { assert.NoError(t, eng.Close()) })
+	assert.NotNil(t, eng)
+}
+
+// TestDockerDesktopSocketNoHome verifies that dockerDesktopSocket returns ""
+// when the HOME environment variable is set to an invalid value that prevents
+// [os.UserHomeDir] from succeeding.
+func TestDockerDesktopSocketNoHome(t *testing.T) {
+	// os.UserHomeDir on Linux uses $HOME. Temporarily clear it to simulate
+	// the error path.
+	t.Setenv("HOME", "")
+	// On Linux, os.UserHomeDir falls back to the passwd file, which still
+	// works in most environments. Skip the test if a home dir is still found.
+	home, err := os.UserHomeDir()
+	if err == nil && home != "" {
+		t.Skipf("os.UserHomeDir() still returns %q with HOME=; skipping error-path test", home)
+	}
+	assert.Empty(t, dockerDesktopSocket())
+}
+
+// TestPodmanRootlessSocketNoHome verifies that podmanRootlessSocket returns ""
+// when neither XDG_RUNTIME_DIR nor a resolvable home directory is available.
+func TestPodmanRootlessSocketNoHome(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	t.Setenv("HOME", "")
+	home, err := os.UserHomeDir()
+	if err == nil && home != "" {
+		t.Skipf("os.UserHomeDir() still returns %q with HOME=; skipping error-path test", home)
+	}
+	assert.Empty(t, podmanRootlessSocket())
+}
+
+// TestBuildAndResolveDockerEngineError verifies that buildAndResolveDockerEngine
+// returns an error (wrapping ErrDaemonInfo) when the daemon is unreachable at
+// the resolveInfo step.
+func TestBuildAndResolveDockerEngineError(t *testing.T) {
+	t.Parallel()
+	// Point at a TCP address with no server; resolveInfo will fail.
+	_, err := buildAndResolveDockerEngine(t.Context(), dockerConfig{
+		Host:   "tcp://127.0.0.1:1",
+		Logger: slog.Default(),
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDaemonInfo)
 }
