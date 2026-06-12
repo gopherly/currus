@@ -253,6 +253,13 @@ func (e *dockerEngine) CreateContainer(ctx context.Context, spec ContainerSpec) 
 	if err != nil {
 		return "", err
 	}
+	if len(portBindings) > 0 {
+		exposed := make(network.PortSet, len(portBindings))
+		for port := range portBindings {
+			exposed[port] = struct{}{}
+		}
+		cfg.ExposedPorts = exposed
+	}
 
 	hc := &container.HostConfig{
 		Mounts:        dockerConvertMounts(spec.Mounts),
